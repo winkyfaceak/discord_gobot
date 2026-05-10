@@ -21,6 +21,13 @@ type Command interface {
 	Handle(s *discordgo.Session, i *discordgo.InteractionCreate)
 }
 
+// ComponentCommand is implemented by commands that own Discord message components
+// such as buttons or select menus. The bot routes component interactions by prefix.
+type ComponentCommand interface {
+	ComponentPrefix() string
+	HandleComponent(s *discordgo.Session, i *discordgo.InteractionCreate)
+}
+
 // All returns the complete command list for the bot.
 //
 // To add a new command:

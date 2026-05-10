@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"discord_gobot/internal/commands"
@@ -30,6 +31,9 @@ type Bot struct {
 	// commandByName lets us quickly find the correct handler when a user runs
 	// a slash command
 	commandByName map[string]commands.Command
+
+	// componentByPrefix routes Discord button/select-menu custom IDs.
+	componentByPrefix map[string]commands.ComponentCommand
 }
 
 // New creates a Bot but does not connect to Discord yet
@@ -47,10 +51,11 @@ func New(cfg config.Config, cmds []commands.Command) (*Bot, error) {
 	}
 
 	b := &Bot{
-		session:       session,
-		cfg:           cfg,
-		commands:      cmds,
-		commandByName: make(map[string]commands.Command),
+		session:           session,
+		cfg:               cfg,
+		commands:          cmds,
+		commandByName:     make(map[string]commands.Command),
+		componentByPrefix: make(map[string]commands.ComponentCommand),
 	}
 
 	// Build a lookup table:
@@ -76,6 +81,17 @@ func New(cfg config.Config, cmds []commands.Command) (*Bot, error) {
 		}
 
 		b.commandByName[def.Name] = cmd
+
+		if componentCommand, ok := cmd.(commands.ComponentCommand); ok {
+			prefix := strings.TrimSpace(componentCommand.ComponentPrefix())
+			if prefix == "" {
+				return nil, fmt.Errorf("component command /%s has empty component prefix", def.Name)
+			}
+			if _, exists := b.componentByPrefix[prefix]; exists {
+				return nil, fmt.Errorf("duplicate component prefix: %s", prefix)
+			}
+			b.componentByPrefix[prefix] = componentCommand
+		}
 	}
 
 	// Register event handlers
@@ -204,27 +220,40 @@ func (b *Bot) onReady(s *discordgo.Session, r *discordgo.Ready) {
 
 // onInteractionCreate runs when a Discord interaction is created.
 //
-// Slash commands, buttons, select menus, and modals are all interactions
-// This bot only handles slash commands for now
+// Slash commands, buttons, select menus, and modals are all interactions.
 func (b *Bot) onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	// Ignore interactions that are not slash commands.
-	if i.Type != discordgo.InteractionApplicationCommand {
-		return
+	switch i.Type {
+	case discordgo.InteractionApplicationCommand:
+		b.handleApplicationCommand(s, i)
+	case discordgo.InteractionMessageComponent:
+		b.handleMessageComponent(s, i)
 	}
+}
 
-	// Get the slash command name, for example:
-	//
-	//   /ping  -> "ping"
-	//   /hello -> "hello"
+func (b *Bot) handleApplicationCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	name := i.ApplicationCommandData().Name
 
-	// Find the matching command implementation
 	cmd, ok := b.commandByName[name]
 	if !ok {
 		log.Printf("No handler found for command: /%s", name)
 		return
 	}
 
-	// Run the command's handler
 	cmd.Handle(s, i)
+}
+
+func (b *Bot) handleMessageComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	customID := i.MessageComponentData().CustomID
+	prefix := customID
+	if separator := strings.Index(customID, ":"); separator >= 0 {
+		prefix = customID[:separator]
+	}
+
+	handler, ok := b.componentByPrefix[prefix]
+	if !ok {
+		log.Printf("No component handler found for custom ID prefix: %s", prefix)
+		return
+	}
+
+	handler.HandleComponent(s, i)
 }

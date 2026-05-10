@@ -135,3 +135,69 @@ func EditOriginalEmbed(
 		log.Printf("error editing interaction response with embed: %v", err)
 	}
 }
+
+// EditOriginalEmbedWithComponents edits the original deferred interaction response
+// with an embed and Discord components such as buttons.
+func EditOriginalEmbedWithComponents(
+	s *discordgo.Session,
+	i *discordgo.InteractionCreate,
+	embed *discordgo.MessageEmbed,
+	components []discordgo.MessageComponent,
+) {
+	embeds := []*discordgo.MessageEmbed{embed}
+
+	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Embeds:     &embeds,
+		Components: &components,
+	})
+
+	if err != nil {
+		log.Printf("error editing interaction response with embed/components: %v", err)
+	}
+}
+
+// DeferComponentUpdate acknowledges a button/select-menu click and lets the bot
+// edit the message after slower API work completes.
+func DeferComponentUpdate(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredMessageUpdate,
+	})
+
+	if err != nil {
+		log.Printf("error deferring component update: %v", err)
+	}
+}
+
+// UpdateComponentMessage updates the original message attached to a component.
+func UpdateComponentMessage(
+	s *discordgo.Session,
+	i *discordgo.InteractionCreate,
+	embed *discordgo.MessageEmbed,
+	components []discordgo.MessageComponent,
+) {
+	embeds := []*discordgo.MessageEmbed{embed}
+
+	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Embeds:     &embeds,
+		Components: &components,
+	})
+
+	if err != nil {
+		log.Printf("error updating component message: %v", err)
+	}
+}
+
+// RespondEphemeralToComponent sends a private message for a component click.
+func RespondEphemeralToComponent(s *discordgo.Session, i *discordgo.InteractionCreate, message string) {
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: message,
+			Flags:   discordgo.MessageFlagsEphemeral,
+		},
+	})
+
+	if err != nil {
+		log.Printf("error responding ephemerally to component: %v", err)
+	}
+}

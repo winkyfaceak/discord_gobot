@@ -88,9 +88,63 @@ func (c *Client) ActiveMatches(ctx context.Context, accountID int64) ([]ActiveMa
 	return matches, nil
 }
 
+// HeroBuildStats fetches build performance stats for a hero.
+func (c *Client) HeroBuildStats(ctx context.Context, heroID int32, accountID int64) ([]HeroBuildStats, error) {
+	path := fmt.Sprintf("/v1/analytics/hero-build-stats/%d", heroID)
+	values := url.Values{}
+	values.Set("min_matches", "1")
+	if accountID > 0 {
+		values.Set("account_ids", strconv.FormatInt(accountID, 10))
+	}
+
+	var stats []HeroBuildStats
+	err := c.getJSON(ctx, path, values, &stats)
+	if err != nil {
+		return nil, err
+	}
+
+	return stats, nil
+}
+
+// BuildItemStats fetches popular item usage from hero builds.
+func (c *Client) BuildItemStats(ctx context.Context, heroID int32) ([]BuildItemStats, error) {
+	values := url.Values{}
+	if heroID > 0 {
+		values.Set("hero_id", strconv.FormatInt(int64(heroID), 10))
+	}
+
+	var stats []BuildItemStats
+	err := c.getJSON(ctx, "/v1/analytics/build-item-stats", values, &stats)
+	if err != nil {
+		return nil, err
+	}
+
+	return stats, nil
+}
+
+// HeroAssets fetches hero metadata from the static assets API.
+func (c *Client) HeroAssets(ctx context.Context) (any, error) {
+	var payload any
+	err := c.getJSONFromBase(ctx, c.assetsBaseURL, "/v2/heroes", nil, &payload)
+	if err != nil {
+		return nil, err
+	}
+
+	return payload, nil
+}
+
+// ItemAssets fetches item metadata from the static assets API.
+func (c *Client) ItemAssets(ctx context.Context) (any, error) {
+	var payload any
+	err := c.getJSONFromBase(ctx, c.assetsBaseURL, "/v2/items", nil, &payload)
+	if err != nil {
+		return nil, err
+	}
+
+	return payload, nil
+}
+
 // RankAssets fetches rank metadata from the static assets API.
-// The assets response can change shape over time, so callers intentionally parse
-// it as generic JSON and extract the useful image/name fields defensively.
 func (c *Client) RankAssets(ctx context.Context) (any, error) {
 	var payload any
 	err := c.getJSONFromBase(ctx, c.assetsBaseURL, "/v2/ranks", nil, &payload)

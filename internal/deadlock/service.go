@@ -3,8 +3,6 @@ package deadlock
 import (
 	"context"
 	"errors"
-	"fmt"
-	"math"
 	"sort"
 	"strings"
 )
@@ -14,6 +12,7 @@ const defaultRecentLimit = 5
 // Service contains the Deadlock statistics business logic.
 type Service struct {
 	client *Client
+	assets *AssetCache
 }
 
 // PlayerLookupOptions controls optional sections attached to a PlayerSummary.
@@ -21,6 +20,7 @@ type PlayerLookupOptions struct {
 	RecentLimit    int
 	IncludeRank    bool
 	IncludeCurrent bool
+	IncludeBuilds  bool
 }
 
 // NewService creates a Deadlock statistics service.
@@ -31,6 +31,7 @@ func NewService(client *Client) *Service {
 
 	return &Service{
 		client: client,
+		assets: NewAssetCache(client),
 	}
 }
 
@@ -42,11 +43,20 @@ func (s *Service) LookupPlayer(ctx context.Context, accountName string) (*Player
 }
 
 // LookupPlayerWithOptions searches by account name, calculates player statistics,
-// and optionally attaches rank/current-game sections.
+// and optionally attaches rank/current-game/build sections.
 func (s *Service) LookupPlayerWithOptions(ctx context.Context, accountName string, options PlayerLookupOptions) (*PlayerSummary, error) {
 	profile, err := s.resolveProfile(ctx, accountName)
 	if err != nil {
 		return nil, err
+	}
+
+	return s.LookupPlayerByProfile(ctx, profile, options)
+}
+
+// LookupPlayerByProfile calculates player statistics for an already resolved profile.
+func (s *Service) LookupPlayerByProfile(ctx context.Context, profile SteamProfile, options PlayerLookupOptions) (*PlayerSummary, error) {
+	if profile.AccountID <= 0 {
+		return nil, errors.New("account id cannot be empty")
 	}
 
 	history, err := s.client.MatchHistory(ctx, profile.AccountID)
@@ -63,6 +73,7 @@ func (s *Service) LookupPlayerWithOptions(ctx context.Context, accountName strin
 	}
 
 	summary := summarizeMatchHistory(profile, history, options.RecentLimit)
+	s.enrichSummaryAssets(ctx, &summary)
 
 	if options.IncludeRank {
 		rank, rankErr := s.lookupRankForProfile(ctx, profile)
@@ -79,6 +90,15 @@ func (s *Service) LookupPlayerWithOptions(ctx context.Context, accountName strin
 			summary.CurrentGameError = currentErr.Error()
 		} else {
 			summary.CurrentGame = current
+		}
+	}
+
+	if options.IncludeBuilds {
+		build, buildErr := s.lookupBuildInsights(ctx, summary.AccountID, summary.TopHeroID)
+		if buildErr != nil {
+			summary.BuildError = buildErr.Error()
+		} else {
+			summary.Build = build
 		}
 	}
 
@@ -130,9 +150,11 @@ func (s *Service) lookupRankForProfile(ctx context.Context, profile SteamProfile
 	}
 
 	if prediction != nil && prediction.Badge > 0 {
-		name, imageURL := s.rankAssetDetails(ctx, prediction.Badge)
-		prediction.Name = name
-		prediction.ImageURL = imageURL
+		if snapshot, assetErr := s.assets.Snapshot(ctx); assetErr == nil {
+			asset := snapshot.Rank(prediction.Badge)
+			prediction.Name = asset.Name
+			prediction.ImageURL = asset.BestImageURL()
+		}
 	}
 
 	return &RankStatus{
@@ -164,7 +186,13 @@ func (s *Service) lookupCurrentGameForProfile(ctx context.Context, profile Steam
 		}
 
 		matchCopy := match
-		playerCopy := *player
+		s.enrichActiveMatchAssets(ctx, &matchCopy)
+		enrichedPlayer := matchCopy.PlayerForAccountID(profile.AccountID)
+		if enrichedPlayer == nil {
+			continue
+		}
+
+		playerCopy := *enrichedPlayer
 		status.InGame = true
 		status.Match = &matchCopy
 		status.Player = &playerCopy
@@ -172,6 +200,129 @@ func (s *Service) lookupCurrentGameForProfile(ctx context.Context, profile Steam
 	}
 
 	return status, nil
+}
+
+func (s *Service) lookupBuildInsights(ctx context.Context, accountID int64, heroID int32) (*BuildInsight, error) {
+	if heroID <= 0 {
+		return nil, errors.New("no top hero was found for build lookup")
+	}
+
+	var snapshot *AssetSnapshot
+	if assets, err := s.assets.Snapshot(ctx); err == nil {
+		snapshot = assets
+	}
+
+	hero := AssetDetails{ID: heroID}
+	if snapshot != nil {
+		hero = snapshot.Hero(heroID)
+	}
+
+	buildStats, err := s.client.HeroBuildStats(ctx, heroID, accountID)
+	playerFiltered := true
+	if err != nil || len(buildStats) == 0 {
+		// Fallback to global hero build stats so the page still gives useful build ideas.
+		buildStats, err = s.client.HeroBuildStats(ctx, heroID, 0)
+		playerFiltered = false
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	sort.Slice(buildStats, func(i, j int) bool {
+		if buildStats[i].Matches == buildStats[j].Matches {
+			return percent64(buildStats[i].Wins, buildStats[i].Matches) > percent64(buildStats[j].Wins, buildStats[j].Matches)
+		}
+		return buildStats[i].Matches > buildStats[j].Matches
+	})
+
+	buildLimit := minInt(len(buildStats), 5)
+	builds := make([]HeroBuildInsight, 0, buildLimit)
+	for _, stat := range buildStats[:buildLimit] {
+		builds = append(builds, HeroBuildInsight{
+			HeroBuildID: stat.HeroBuildID,
+			Wins:        stat.Wins,
+			Losses:      stat.Losses,
+			Matches:     stat.Matches,
+			Players:     stat.Players,
+			WinRate:     percent64(stat.Wins, stat.Matches),
+		})
+	}
+
+	itemStats, itemErr := s.client.BuildItemStats(ctx, heroID)
+	popularItems := []ItemBuildInsight{}
+	if itemErr == nil {
+		sort.Slice(itemStats, func(i, j int) bool {
+			return itemStats[i].Builds > itemStats[j].Builds
+		})
+
+		itemLimit := minInt(len(itemStats), 8)
+		popularItems = make([]ItemBuildInsight, 0, itemLimit)
+		for _, stat := range itemStats[:itemLimit] {
+			itemID := int32(stat.ItemID)
+			item := AssetDetails{ID: itemID}
+			if snapshot != nil {
+				item = snapshot.Item(itemID)
+			}
+			popularItems = append(popularItems, ItemBuildInsight{
+				ItemID:  itemID,
+				Name:    item.DisplayName("Item"),
+				IconURL: item.BestImageURL(),
+				Builds:  stat.Builds,
+			})
+		}
+	}
+
+	note := "Player-filtered hero build stats."
+	if !playerFiltered {
+		note = "Global hero build stats fallback."
+	}
+
+	return &BuildInsight{
+		HeroID:           heroID,
+		HeroName:         hero.DisplayName("Hero"),
+		HeroIconURL:      hero.BestImageURL(),
+		PlayerFiltered:   playerFiltered,
+		Builds:           builds,
+		PopularItems:     popularItems,
+		BuildsSourceNote: note,
+	}, nil
+}
+
+func (s *Service) enrichSummaryAssets(ctx context.Context, summary *PlayerSummary) {
+	snapshot, err := s.assets.Snapshot(ctx)
+	if err != nil || snapshot == nil || summary == nil {
+		return
+	}
+
+	if summary.TopHeroID > 0 {
+		hero := snapshot.Hero(summary.TopHeroID)
+		summary.TopHeroName = hero.DisplayName("Hero")
+		summary.TopHeroIconURL = hero.BestImageURL()
+	}
+
+	for index := range summary.RecentMatches {
+		match := &summary.RecentMatches[index]
+		hero := snapshot.Hero(match.HeroID)
+		match.HeroName = hero.DisplayName("Hero")
+		match.HeroIconURL = hero.BestImageURL()
+	}
+}
+
+func (s *Service) enrichActiveMatchAssets(ctx context.Context, match *ActiveMatch) {
+	snapshot, err := s.assets.Snapshot(ctx)
+	if err != nil || snapshot == nil || match == nil {
+		return
+	}
+
+	for index := range match.Players {
+		player := &match.Players[index]
+		if player.HeroID == nil || *player.HeroID <= 0 {
+			continue
+		}
+		hero := snapshot.Hero(*player.HeroID)
+		player.HeroName = hero.DisplayName("Hero")
+		player.HeroIconURL = hero.BestImageURL()
+	}
 }
 
 func bestProfileMatch(query string, profiles []SteamProfile) SteamProfile {
@@ -337,190 +488,17 @@ func percent(part int, total int) float64 {
 	return float64(part) / float64(total) * 100
 }
 
-func (s *Service) rankAssetDetails(ctx context.Context, badge int32) (name string, imageURL string) {
-	payload, err := s.client.RankAssets(ctx)
-	if err != nil {
-		return "", ""
+func percent64(part int64, total int64) float64 {
+	if total == 0 {
+		return 0
 	}
 
-	name, imageURL = findRankAsset(payload, badge)
-	return name, imageURL
+	return float64(part) / float64(total) * 100
 }
 
-func findRankAsset(payload any, badge int32) (name string, imageURL string) {
-	var walk func(value any) bool
-
-	walk = func(value any) bool {
-		switch typed := value.(type) {
-		case []any:
-			for _, child := range typed {
-				if walk(child) {
-					return true
-				}
-			}
-		case map[string]any:
-			if rankMapMatches(typed, badge) {
-				name = firstRankName(typed)
-				imageURL = bestImageURL(typed)
-				if name != "" || imageURL != "" {
-					return true
-				}
-			}
-
-			for _, child := range typed {
-				if walk(child) {
-					return true
-				}
-			}
-		}
-
-		return false
+func minInt(a, b int) int {
+	if a < b {
+		return a
 	}
-
-	walk(payload)
-	return name, imageURL
-}
-
-func rankMapMatches(values map[string]any, badge int32) bool {
-	tier := badge / 10
-
-	for key, value := range values {
-		lowerKey := strings.ToLower(key)
-		number, ok := numberAsInt64(value)
-		if !ok {
-			continue
-		}
-
-		if strings.Contains(lowerKey, "badge") && number == int64(badge) {
-			return true
-		}
-
-		if (strings.Contains(lowerKey, "rank") || strings.Contains(lowerKey, "tier")) && number == int64(tier) {
-			return true
-		}
-
-		if lowerKey == "id" && (number == int64(badge) || number == int64(tier)) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func firstRankName(values map[string]any) string {
-	preferredKeys := []string{"name", "display_name", "rank_name", "title"}
-
-	for _, preferredKey := range preferredKeys {
-		for key, value := range values {
-			if strings.EqualFold(key, preferredKey) {
-				if text, ok := value.(string); ok && strings.TrimSpace(text) != "" {
-					return strings.TrimSpace(text)
-				}
-			}
-		}
-	}
-
-	return ""
-}
-
-func bestImageURL(value any) string {
-	type candidate struct {
-		url   string
-		score int
-	}
-
-	var candidates []candidate
-
-	var walk func(value any, keyHint string)
-	walk = func(value any, keyHint string) {
-		switch typed := value.(type) {
-		case string:
-			if url := normalizeImageURL(typed); url != "" {
-				score := 1
-				lowerKey := strings.ToLower(keyHint)
-				lowerURL := strings.ToLower(url)
-
-				for _, token := range []string{"large", "big", "image", "icon", "badge", "rank"} {
-					if strings.Contains(lowerKey, token) || strings.Contains(lowerURL, token) {
-						score++
-					}
-				}
-
-				candidates = append(candidates, candidate{url: url, score: score})
-			}
-		case []any:
-			for _, child := range typed {
-				walk(child, keyHint)
-			}
-		case map[string]any:
-			for key, child := range typed {
-				walk(child, key)
-			}
-		}
-	}
-
-	walk(value, "")
-
-	if len(candidates) == 0 {
-		return ""
-	}
-
-	sort.SliceStable(candidates, func(i, j int) bool {
-		return candidates[i].score > candidates[j].score
-	})
-
-	return candidates[0].url
-}
-
-func normalizeImageURL(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-
-	lower := strings.ToLower(value)
-	isImage := strings.Contains(lower, ".png") ||
-		strings.Contains(lower, ".jpg") ||
-		strings.Contains(lower, ".jpeg") ||
-		strings.Contains(lower, ".webp")
-	if !isImage {
-		return ""
-	}
-
-	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
-		return value
-	}
-
-	if strings.HasPrefix(value, "/") {
-		return "https://assets.deadlock-api.com" + value
-	}
-
-	return ""
-}
-
-func numberAsInt64(value any) (int64, bool) {
-	switch typed := value.(type) {
-	case int:
-		return int64(typed), true
-	case int32:
-		return int64(typed), true
-	case int64:
-		return typed, true
-	case float64:
-		if math.Trunc(typed) == typed {
-			return int64(typed), true
-		}
-	case float32:
-		float := float64(typed)
-		if math.Trunc(float) == float {
-			return int64(typed), true
-		}
-	case string:
-		var parsed int64
-		if _, err := fmt.Sscanf(strings.TrimSpace(typed), "%d", &parsed); err == nil {
-			return parsed, true
-		}
-	}
-
-	return 0, false
+	return b
 }

@@ -35,6 +35,10 @@ func RenderCardPNG(ctx context.Context, summary PlayerSummary) ([]byte, error) {
 
 func buildStatsSVG(summary PlayerSummary) string {
 	name := escapeSVG(summary.Name)
+	topHero := escapeSVG(summary.TopHeroName)
+	if topHero == "" {
+		topHero = fmt.Sprintf("Hero ID: %d", summary.TopHeroID)
+	}
 
 	return fmt.Sprintf(`
 <svg width="1200" height="675" viewBox="0 0 1200 675" xmlns="http://www.w3.org/2000/svg">
@@ -61,14 +65,14 @@ func buildStatsSVG(summary PlayerSummary) string {
 
   %s
 
-  <text x="120" y="545" font-family="Arial, Helvetica, sans-serif" font-size="23" fill="#d8dee9">Top Hero ID: %d • %d matches • %.1f%% WR</text>
-  <text x="120" y="580" font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#8792a2">Hero-name lookup can be added next through the assets API.</text>
+  <text x="120" y="545" font-family="Arial, Helvetica, sans-serif" font-size="23" fill="#d8dee9">Top Hero: %s • %d matches • %.1f%% WR</text>
+  <text x="120" y="580" font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#8792a2">Use the Discord buttons for rank, current match, recent games, and build pages.</text>
 </svg>
 `,
 		name,
 		summary.AccountID,
 		buildStatTilesSVG(summary),
-		summary.TopHeroID,
+		topHero,
 		summary.TopHeroMatches,
 		summary.TopHeroWinRate,
 	)

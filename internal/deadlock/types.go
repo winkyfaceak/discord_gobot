@@ -24,6 +24,10 @@ func (p SteamProfile) DisplayName() string {
 		return p.PersonaName
 	}
 
+	if p.AccountID > 0 {
+		return fmt.Sprintf("Account %d", p.AccountID)
+	}
+
 	return "Unknown Player"
 }
 
@@ -47,10 +51,34 @@ type MatchHistoryEntry struct {
 	StartTime     int64 `json:"start_time"`
 }
 
+// AssetDetails is the small static-asset shape the bot needs for Discord UI.
+type AssetDetails struct {
+	ID       int32
+	Name     string
+	IconURL  string
+	ImageURL string
+}
+
+func (a AssetDetails) DisplayName(fallback string) string {
+	if a.Name != "" {
+		return a.Name
+	}
+	return fallback
+}
+
+func (a AssetDetails) BestImageURL() string {
+	if a.IconURL != "" {
+		return a.IconURL
+	}
+	return a.ImageURL
+}
+
 // RecentMatch is a smaller display-focused match shape.
 type RecentMatch struct {
 	MatchID      int64
 	HeroID       int32
+	HeroName     string
+	HeroIconURL  string
 	Won          bool
 	Kills        int32
 	Deaths       int32
@@ -83,7 +111,10 @@ func (r RankPrediction) SubRank() int32 {
 
 func (r RankPrediction) DisplayName() string {
 	if r.Name != "" {
-		return fmt.Sprintf("%s %d", r.Name, r.SubRank())
+		if r.SubRank() > 0 {
+			return fmt.Sprintf("%s %d", r.Name, r.SubRank())
+		}
+		return r.Name
 	}
 
 	if r.Badge > 0 {
@@ -154,6 +185,10 @@ type ActiveMatchPlayer struct {
 	TeamParsed string `json:"team_parsed"`
 	Abandoned  *bool  `json:"abandoned"`
 	HeroID     *int32 `json:"hero_id"`
+
+	// Filled from the static assets API when available.
+	HeroName    string `json:"-"`
+	HeroIconURL string `json:"-"`
 }
 
 // CurrentGameStatus is a display object for active/current game lookup.
@@ -165,6 +200,49 @@ type CurrentGameStatus struct {
 	InGame     bool
 	Match      *ActiveMatch
 	Player     *ActiveMatchPlayer
+}
+
+// BuildItemStats is returned by /v1/analytics/build-item-stats.
+type BuildItemStats struct {
+	Builds int64 `json:"builds"`
+	ItemID int64 `json:"item_id"`
+}
+
+// HeroBuildStats is returned by /v1/analytics/hero-build-stats/{hero_id}.
+type HeroBuildStats struct {
+	HeroBuildID int64 `json:"hero_build_id"`
+	HeroID      int32 `json:"hero_id"`
+	Wins        int64 `json:"wins"`
+	Losses      int64 `json:"losses"`
+	Matches     int64 `json:"matches"`
+	Players     int64 `json:"players"`
+}
+
+// BuildInsight is the Discord-display object for the Builds/Items page.
+type BuildInsight struct {
+	HeroID           int32
+	HeroName         string
+	HeroIconURL      string
+	PlayerFiltered   bool
+	Builds           []HeroBuildInsight
+	PopularItems     []ItemBuildInsight
+	BuildsSourceNote string
+}
+
+type HeroBuildInsight struct {
+	HeroBuildID int64
+	Wins        int64
+	Losses      int64
+	Matches     int64
+	Players     int64
+	WinRate     float64
+}
+
+type ItemBuildInsight struct {
+	ItemID  int32
+	Name    string
+	IconURL string
+	Builds  int64
 }
 
 // PlayerSummary is the final calculated statistics object.
@@ -187,6 +265,8 @@ type PlayerSummary struct {
 	AvgDenies   float64
 
 	TopHeroID      int32
+	TopHeroName    string
+	TopHeroIconURL string
 	TopHeroMatches int
 	TopHeroWinRate float64
 
@@ -196,4 +276,6 @@ type PlayerSummary struct {
 	RankError        string
 	CurrentGame      *CurrentGameStatus
 	CurrentGameError string
+	Build            *BuildInsight
+	BuildError       string
 }
