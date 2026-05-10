@@ -1,6 +1,7 @@
 package discordutil
 
 import (
+	"bytes"
 	"log"
 
 	"github.com/bwmarrin/discordgo"
@@ -81,5 +82,56 @@ func FollowUp(s *discordgo.Session, i *discordgo.InteractionCreate, message stri
 
 	if err != nil {
 		log.Printf("error sending follow-up message: %v", err)
+	}
+}
+
+// EditOriginalWithImage edits the original interaction response and attaches
+// a PNG image.
+//
+// The embed can reference the image using:
+//
+//	attachment://filename.png
+func EditOriginalWithImage(
+	s *discordgo.Session,
+	i *discordgo.InteractionCreate,
+	message string,
+	filename string,
+	imageBytes []byte,
+	embed *discordgo.MessageEmbed,
+) {
+	embeds := []*discordgo.MessageEmbed{embed}
+
+	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Content: &message,
+		Embeds:  &embeds,
+		Files: []*discordgo.File{
+			{
+				Name:        filename,
+				ContentType: "image/png",
+				Reader:      bytes.NewReader(imageBytes),
+			},
+		},
+	})
+
+	if err != nil {
+		log.Printf("error editing interaction response with image: %v", err)
+	}
+}
+
+// EditOriginalEmbed edits the original deferred interaction response using
+// a Discord embed.
+func EditOriginalEmbed(
+	s *discordgo.Session,
+	i *discordgo.InteractionCreate,
+	embed *discordgo.MessageEmbed,
+) {
+	embeds := []*discordgo.MessageEmbed{embed}
+
+	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Embeds: &embeds,
+	})
+
+	if err != nil {
+		log.Printf("error editing interaction response with embed: %v", err)
 	}
 }
