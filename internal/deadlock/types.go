@@ -1,5 +1,7 @@
 package deadlock
 
+import "fmt"
+
 // SteamProfile represents a Steam profile returned by Deadlock API search.
 type SteamProfile struct {
 	AccountID int64 `json:"account_id"`
@@ -60,6 +62,111 @@ type RecentMatch struct {
 	StartedUnix  int64
 }
 
+// RankPrediction is returned by /v1/players/{account_id}/rank-predict.
+type RankPrediction struct {
+	Badge       int32   `json:"badge"`
+	RawScore    float64 `json:"raw_score"`
+	MatchesUsed int     `json:"matches_used"`
+
+	// Filled from the static assets API when available.
+	Name     string
+	ImageURL string
+}
+
+func (r RankPrediction) Tier() int32 {
+	return r.Badge / 10
+}
+
+func (r RankPrediction) SubRank() int32 {
+	return r.Badge % 10
+}
+
+func (r RankPrediction) DisplayName() string {
+	if r.Name != "" {
+		return fmt.Sprintf("%s %d", r.Name, r.SubRank())
+	}
+
+	if r.Badge > 0 {
+		return fmt.Sprintf("Badge %d (Tier %d / Sub-rank %d)", r.Badge, r.Tier(), r.SubRank())
+	}
+
+	return "Unknown rank"
+}
+
+// RankStatus is a display object for a player's predicted rank.
+type RankStatus struct {
+	AccountID  int64
+	Name       string
+	ProfileURL string
+	Avatar     string
+	Rank       *RankPrediction
+}
+
+// ActiveMatch represents one match from /v1/matches/active.
+type ActiveMatch struct {
+	StartTime          *int64              `json:"start_time"`
+	WinningTeam        *int32              `json:"winning_team"`
+	WinningTeamParsed  string              `json:"winning_team_parsed"`
+	MatchID            *int64              `json:"match_id"`
+	Players            []ActiveMatchPlayer `json:"players"`
+	LobbyID            *int64              `json:"lobby_id"`
+	GameModeVersion    *int32              `json:"game_mode_version"`
+	NetWorthTeam0      *int32              `json:"net_worth_team_0"`
+	NetWorthTeam1      *int32              `json:"net_worth_team_1"`
+	DurationS          *int32              `json:"duration_s"`
+	Spectators         *int32              `json:"spectators"`
+	OpenSpectatorSlots *int32              `json:"open_spectator_slots"`
+	MatchMode          *int32              `json:"match_mode"`
+	MatchModeParsed    string              `json:"match_mode_parsed"`
+	GameMode           *int32              `json:"game_mode"`
+	GameModeParsed     string              `json:"game_mode_parsed"`
+	MatchScore         *int32              `json:"match_score"`
+	RegionMode         *int32              `json:"region_mode"`
+	RegionModeParsed   string              `json:"region_mode_parsed"`
+}
+
+func (m ActiveMatch) PlayerForAccountID(accountID int64) *ActiveMatchPlayer {
+	for index := range m.Players {
+		player := &m.Players[index]
+		if player.AccountID != nil && *player.AccountID == accountID {
+			return player
+		}
+	}
+
+	return nil
+}
+
+func (m ActiveMatch) NetWorthForTeam(team int32) *int32 {
+	switch team {
+	case 0:
+		return m.NetWorthTeam0
+	case 1:
+		return m.NetWorthTeam1
+	default:
+		return nil
+	}
+}
+
+// ActiveMatchPlayer is a player row inside an active match.
+type ActiveMatchPlayer struct {
+	AccountID  *int64 `json:"account_id"`
+	Team       *int32 `json:"team"`
+	TeamParsed string `json:"team_parsed"`
+	Abandoned  *bool  `json:"abandoned"`
+	HeroID     *int32 `json:"hero_id"`
+}
+
+// CurrentGameStatus is a display object for active/current game lookup.
+type CurrentGameStatus struct {
+	AccountID  int64
+	Name       string
+	ProfileURL string
+	Avatar     string
+	InGame     bool
+	Match      *ActiveMatch
+	Player     *ActiveMatchPlayer
+}
+
 // PlayerSummary is the final calculated statistics object.
 type PlayerSummary struct {
 	AccountID  int64
@@ -84,4 +191,9 @@ type PlayerSummary struct {
 	TopHeroWinRate float64
 
 	RecentMatches []RecentMatch
+
+	Rank             *RankPrediction
+	RankError        string
+	CurrentGame      *CurrentGameStatus
+	CurrentGameError string
 }

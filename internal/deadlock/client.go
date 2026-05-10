@@ -7,14 +7,16 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // Client talks to Deadlock API over HTTP.
 type Client struct {
-	baseURL    string
-	httpClient *http.Client
+	baseURL       string
+	assetsBaseURL string
+	httpClient    *http.Client
 }
 
 // NewClient creates a Deadlock API client.
@@ -26,8 +28,9 @@ func NewClient(httpClient *http.Client) *Client {
 	}
 
 	return &Client{
-		baseURL:    "https://api.deadlock-api.com",
-		httpClient: httpClient,
+		baseURL:       "https://api.deadlock-api.com",
+		assetsBaseURL: "https://assets.deadlock-api.com",
+		httpClient:    httpClient,
 	}
 }
 
@@ -58,8 +61,52 @@ func (c *Client) MatchHistory(ctx context.Context, accountID int64) ([]MatchHist
 	return history, nil
 }
 
+// RankPrediction fetches the Deadlock API rank prediction for a player.
+func (c *Client) RankPrediction(ctx context.Context, accountID int64) (*RankPrediction, error) {
+	path := fmt.Sprintf("/v1/players/%d/rank-predict", accountID)
+
+	var prediction RankPrediction
+	err := c.getJSON(ctx, path, nil, &prediction)
+	if err != nil {
+		return nil, err
+	}
+
+	return &prediction, nil
+}
+
+// ActiveMatches fetches active matches and filters them by account ID.
+func (c *Client) ActiveMatches(ctx context.Context, accountID int64) ([]ActiveMatch, error) {
+	values := url.Values{}
+	values.Set("account_ids", strconv.FormatInt(accountID, 10))
+
+	var matches []ActiveMatch
+	err := c.getJSON(ctx, "/v1/matches/active", values, &matches)
+	if err != nil {
+		return nil, err
+	}
+
+	return matches, nil
+}
+
+// RankAssets fetches rank metadata from the static assets API.
+// The assets response can change shape over time, so callers intentionally parse
+// it as generic JSON and extract the useful image/name fields defensively.
+func (c *Client) RankAssets(ctx context.Context) (any, error) {
+	var payload any
+	err := c.getJSONFromBase(ctx, c.assetsBaseURL, "/v2/ranks", nil, &payload)
+	if err != nil {
+		return nil, err
+	}
+
+	return payload, nil
+}
+
 func (c *Client) getJSON(ctx context.Context, path string, query url.Values, target any) error {
-	fullURL := strings.TrimRight(c.baseURL, "/") + path
+	return c.getJSONFromBase(ctx, c.baseURL, path, query, target)
+}
+
+func (c *Client) getJSONFromBase(ctx context.Context, baseURL string, path string, query url.Values, target any) error {
+	fullURL := strings.TrimRight(baseURL, "/") + path
 
 	if len(query) > 0 {
 		fullURL += "?" + query.Encode()
