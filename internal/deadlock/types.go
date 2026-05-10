@@ -186,6 +186,11 @@ type ActiveMatchPlayer struct {
 	Abandoned  *bool  `json:"abandoned"`
 	HeroID     *int32 `json:"hero_id"`
 
+	// Filled from the Steam profile API when available.
+	DisplayName string `json:"-"`
+	ProfileURL  string `json:"-"`
+	Avatar      string `json:"-"`
+
 	// Filled from the static assets API when available.
 	HeroName    string `json:"-"`
 	HeroIconURL string `json:"-"`

@@ -187,6 +187,7 @@ func (s *Service) lookupCurrentGameForProfile(ctx context.Context, profile Steam
 
 		matchCopy := match
 		s.enrichActiveMatchAssets(ctx, &matchCopy)
+		s.enrichActiveMatchSteamProfiles(ctx, &matchCopy)
 		enrichedPlayer := matchCopy.PlayerForAccountID(profile.AccountID)
 		if enrichedPlayer == nil {
 			continue
@@ -322,6 +323,54 @@ func (s *Service) enrichActiveMatchAssets(ctx context.Context, match *ActiveMatc
 		hero := snapshot.Hero(*player.HeroID)
 		player.HeroName = hero.DisplayName("Hero")
 		player.HeroIconURL = hero.BestImageURL()
+	}
+}
+
+func (s *Service) enrichActiveMatchSteamProfiles(ctx context.Context, match *ActiveMatch) {
+	if match == nil || len(match.Players) == 0 {
+		return
+	}
+
+	seen := map[int64]bool{}
+	accountIDs := make([]int64, 0, len(match.Players))
+	for _, player := range match.Players {
+		if player.AccountID == nil || *player.AccountID <= 0 {
+			continue
+		}
+
+		accountID := *player.AccountID
+		if seen[accountID] {
+			continue
+		}
+
+		seen[accountID] = true
+		accountIDs = append(accountIDs, accountID)
+	}
+
+	profiles, err := s.client.SteamProfiles(ctx, accountIDs)
+	if err != nil || len(profiles) == 0 {
+		return
+	}
+
+	profilesByID := make(map[int64]SteamProfile, len(profiles))
+	for _, profile := range profiles {
+		profilesByID[profile.AccountID] = profile
+	}
+
+	for index := range match.Players {
+		player := &match.Players[index]
+		if player.AccountID == nil {
+			continue
+		}
+
+		profile, ok := profilesByID[*player.AccountID]
+		if !ok {
+			continue
+		}
+
+		player.DisplayName = profile.DisplayName()
+		player.ProfileURL = profile.ProfileURL
+		player.Avatar = profile.Avatar
 	}
 }
 

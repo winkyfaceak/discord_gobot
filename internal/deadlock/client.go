@@ -48,6 +48,36 @@ func (c *Client) SearchSteam(ctx context.Context, query string) ([]SteamProfile,
 	return profiles, nil
 }
 
+// SteamProfiles fetches Steam profile details for a batch of SteamID3 account IDs.
+func (c *Client) SteamProfiles(ctx context.Context, accountIDs []int64) ([]SteamProfile, error) {
+	if len(accountIDs) == 0 {
+		return nil, nil
+	}
+
+	parts := make([]string, 0, len(accountIDs))
+	for _, accountID := range accountIDs {
+		if accountID <= 0 {
+			continue
+		}
+		parts = append(parts, strconv.FormatInt(accountID, 10))
+	}
+
+	if len(parts) == 0 {
+		return nil, nil
+	}
+
+	values := url.Values{}
+	values.Set("account_ids", strings.Join(parts, ","))
+
+	var profiles []SteamProfile
+	err := c.getJSON(ctx, "/v1/players/steam", values, &profiles)
+	if err != nil {
+		return nil, err
+	}
+
+	return profiles, nil
+}
+
 // MatchHistory fetches the player's Deadlock match history.
 func (c *Client) MatchHistory(ctx context.Context, accountID int64) ([]MatchHistoryEntry, error) {
 	path := fmt.Sprintf("/v1/players/%d/match-history", accountID)

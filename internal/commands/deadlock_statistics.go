@@ -481,6 +481,7 @@ func buildDeadlockCurrentGameEmbed(status deadlockapi.CurrentGameStatus) *discor
 
 		fields = append(fields,
 			&discordgo.MessageEmbedField{Name: "Status", Value: "Currently in game", Inline: true},
+			&discordgo.MessageEmbedField{Name: "Player", Value: formatActivePlayerName(player), Inline: true},
 			&discordgo.MessageEmbedField{Name: "Match ID", Value: formatOptionalInt64(match.MatchID), Inline: true},
 			&discordgo.MessageEmbedField{Name: "Hero", Value: hero, Inline: true},
 			&discordgo.MessageEmbedField{Name: "Team", Value: formatTeam(player), Inline: true},
@@ -701,16 +702,30 @@ func formatActiveRoster(match *deadlockapi.ActiveMatch) string {
 }
 
 func formatActiveRosterPlayer(player deadlockapi.ActiveMatchPlayer) string {
+	playerName := formatActivePlayerName(&player)
+	hero := formatCurrentHero(&player)
+	if player.Abandoned != nil && *player.Abandoned {
+		return fmt.Sprintf("• %s — %s _(abandoned)_", playerName, hero)
+	}
+	return fmt.Sprintf("• %s — %s", playerName, hero)
+}
+
+func formatActivePlayerName(player *deadlockapi.ActiveMatchPlayer) string {
+	if player == nil {
+		return "Unknown"
+	}
+
 	account := "unknown"
 	if player.AccountID != nil {
 		account = strconv.FormatInt(*player.AccountID, 10)
 	}
 
-	hero := formatCurrentHero(&player)
-	if player.Abandoned != nil && *player.Abandoned {
-		return fmt.Sprintf("• `%s` — %s _(abandoned)_", account, hero)
+	name := strings.TrimSpace(player.DisplayName)
+	if name != "" && !strings.EqualFold(name, "Unknown Player") {
+		return fmt.Sprintf("**%s** (`%s`)", name, account)
 	}
-	return fmt.Sprintf("• `%s` — %s", account, hero)
+
+	return "`" + account + "`"
 }
 
 func formatCurrentHero(player *deadlockapi.ActiveMatchPlayer) string {
