@@ -29,5 +29,6 @@ func All() []Command {
 		Hello{},
 		Echo{},
 		Add{},
+		Weather{},
 	}
 }
