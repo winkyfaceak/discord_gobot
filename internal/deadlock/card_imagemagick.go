@@ -37,36 +37,47 @@ func buildStatsSVG(summary PlayerSummary) string {
 	name := escapeSVG(summary.Name)
 	topHero := escapeSVG(summary.TopHeroName)
 	if topHero == "" {
-		topHero = fmt.Sprintf("Hero ID: %d", summary.TopHeroID)
+		topHero = fmt.Sprintf("Hero ID %d", summary.TopHeroID)
 	}
 
 	return fmt.Sprintf(`
 <svg width="1200" height="675" viewBox="0 0 1200 675" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0%%" stop-color="#101827"/>
-      <stop offset="100%%" stop-color="#2b1b10"/>
+    <linearGradient id="paper" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%%" stop-color="#e4d6b4"/>
+      <stop offset="100%%" stop-color="#c9b287"/>
+    </linearGradient>
+
+    <linearGradient id="inkwash" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0%%" stop-color="#2c1d12"/>
+      <stop offset="100%%" stop-color="#5a3f28"/>
     </linearGradient>
 
     <filter id="shadow" x="-20%%" y="-20%%" width="140%%" height="140%%">
-      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000000" flood-opacity="0.35"/>
+      <feDropShadow dx="0" dy="12" stdDeviation="10" flood-color="#000000" flood-opacity="0.18"/>
     </filter>
   </defs>
 
-  <rect width="1200" height="675" fill="url(#bg)"/>
-  <circle cx="1050" cy="110" r="180" fill="#ff9f1c" opacity="0.12"/>
-  <circle cx="130" cy="590" r="220" fill="#62d6ff" opacity="0.10"/>
+  <rect width="1200" height="675" fill="#b3976a"/>
+  <rect x="24" y="24" width="1152" height="627" rx="18" fill="url(#paper)" stroke="#4b3320" stroke-width="4"/>
+  <rect x="45" y="45" width="1110" height="585" rx="12" fill="none" stroke="#7b5a36" stroke-width="2" stroke-dasharray="2 8"/>
 
-  <rect x="60" y="55" width="1080" height="565" rx="34" fill="#101010" opacity="0.72" filter="url(#shadow)"/>
-  <rect x="90" y="85" width="1020" height="505" rx="26" fill="#171a21" opacity="0.95"/>
+  <rect x="72" y="70" width="1056" height="112" rx="12" fill="url(#inkwash)" filter="url(#shadow)"/>
+  <text x="96" y="122" font-family="Georgia, 'Times New Roman', serif" font-size="28" letter-spacing="3" fill="#e5c88b">DEADLOCK DOSSIER</text>
+  <text x="96" y="160" font-family="Georgia, 'Times New Roman', serif" font-size="42" font-weight="700" fill="#fbf3e4">%s</text>
+  <text x="826" y="122" font-family="Georgia, 'Times New Roman', serif" font-size="18" text-anchor="end" fill="#d8c7a4">COMBAT LEDGER</text>
+  <text x="1100" y="160" font-family="Georgia, 'Times New Roman', serif" font-size="20" text-anchor="end" fill="#f3e6cb">ACCOUNT ID %d</text>
 
-  <text x="120" y="145" font-family="Arial, Helvetica, sans-serif" font-size="54" font-weight="800" fill="#ffffff">%s</text>
-  <text x="120" y="188" font-family="Arial, Helvetica, sans-serif" font-size="24" fill="#b8c1d1">Deadlock Statistics • Account ID %d</text>
+  <line x1="95" y1="212" x2="1105" y2="212" stroke="#6d4c2d" stroke-width="3"/>
+  <line x1="95" y1="220" x2="1105" y2="220" stroke="#b89058" stroke-width="1"/>
 
   %s
 
-  <text x="120" y="545" font-family="Arial, Helvetica, sans-serif" font-size="23" fill="#d8dee9">Top Hero: %s • %d matches • %.1f%% WR</text>
-  <text x="120" y="580" font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#8792a2">Use the Discord buttons for rank, current match, recent games, and build pages.</text>
+  <rect x="84" y="558" width="1032" height="52" rx="10" fill="#efe3c8" stroke="#8a6a44" stroke-width="2"/>
+  <text x="108" y="592" font-family="Georgia, 'Times New Roman', serif" font-size="24" fill="#3f2b1a">Top Hero: %s</text>
+  <text x="1095" y="592" font-family="Georgia, 'Times New Roman', serif" font-size="22" text-anchor="end" fill="#5a422b">%d matches • %.1f%% WR</text>
+
+  <text x="600" y="640" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="17" letter-spacing="1.2" fill="#60472e">Filed in a retro bureau style. Use the Discord buttons for the full dossier.</text>
 </svg>
 `,
 		name,
@@ -85,29 +96,32 @@ func buildStatTilesSVG(summary PlayerSummary) string {
 		x     int
 		y     int
 	}{
-		{"Matches", fmt.Sprintf("%d", summary.Matches), 120, 245},
-		{"Win Rate", fmt.Sprintf("%.1f%%", summary.WinRate), 385, 245},
-		{"W / L", fmt.Sprintf("%d / %d", summary.Wins, summary.Losses), 650, 245},
-		{"Avg KDA", fmt.Sprintf("%.1f / %.1f / %.1f", summary.AvgKills, summary.AvgDeaths, summary.AvgAssists), 120, 385},
-		{"Avg Souls", fmt.Sprintf("%.0f", summary.AvgNetWorth), 385, 385},
-		{"LH / Denies", fmt.Sprintf("%.1f / %.1f", summary.AvgLastHits, summary.AvgDenies), 650, 385},
+		{"MATCHES", fmt.Sprintf("%d", summary.Matches), 96, 256},
+		{"SUCCESS RATE", fmt.Sprintf("%.1f%%", summary.WinRate), 366, 256},
+		{"WINS / LOSSES", fmt.Sprintf("%d / %d", summary.Wins, summary.Losses), 636, 256},
+		{"AVERAGE K / D / A", fmt.Sprintf("%.1f / %.1f / %.1f", summary.AvgKills, summary.AvgDeaths, summary.AvgAssists), 96, 404},
+		{"AVERAGE SOULS", fmt.Sprintf("%.0f", summary.AvgNetWorth), 366, 404},
+		{"LH / DENIES", fmt.Sprintf("%.1f / %.1f", summary.AvgLastHits, summary.AvgDenies), 636, 404},
 	}
 
 	var b strings.Builder
 
 	for _, tile := range tiles {
 		b.WriteString(fmt.Sprintf(`
-  <rect x="%d" y="%d" width="230" height="105" rx="22" fill="#242936"/>
-  <text x="%d" y="%d" font-family="Arial, Helvetica, sans-serif" font-size="20" fill="#96a0b5">%s</text>
-  <text x="%d" y="%d" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="800" fill="#ffffff">%s</text>
+  <rect x="%d" y="%d" width="238" height="116" rx="12" fill="#f2e7cf" stroke="#8d6d46" stroke-width="2"/>
+  <rect x="%d" y="%d" width="238" height="24" rx="12" fill="#7a5534" opacity="0.95"/>
+  <text x="%d" y="%d" font-family="Georgia, 'Times New Roman', serif" font-size="16" letter-spacing="1.6" fill="#f8ecd6">%s</text>
+  <text x="%d" y="%d" font-family="Georgia, 'Times New Roman', serif" font-size="34" font-weight="700" fill="#352315">%s</text>
 `,
 			tile.x,
 			tile.y,
-			tile.x+24,
-			tile.y+38,
+			tile.x,
+			tile.y,
+			tile.x+16,
+			tile.y+17,
 			escapeSVG(tile.label),
-			tile.x+24,
-			tile.y+78,
+			tile.x+16,
+			tile.y+76,
 			escapeSVG(tile.value),
 		))
 	}
