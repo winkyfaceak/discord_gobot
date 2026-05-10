@@ -10,26 +10,54 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-// Weather implements the /weather command
+// Weather implements the /weather command.
 //
-// Example:
+// Examples:
 //
 //	/weather location:Dublin
-//	/weather location:New York units:us
-//	/weather location:Tokyo private:true
+//	/weather location:Dublin view:today
+//	/weather location:Dublin view:two_days
+//	/weather location:Dublin view:full private:true
 type Weather struct{}
 
-// Definition tells Discord what the /weather command looks like.
 func (Weather) Definition() *discordgo.ApplicationCommand {
 	return &discordgo.ApplicationCommand{
 		Name:        "weather",
-		Description: "Get the current weather from wttr.in",
+		Description: "Get weather from wttr.in",
 		Options: []*discordgo.ApplicationCommandOption{
 			{
 				Type:        discordgo.ApplicationCommandOptionString,
 				Name:        "location",
 				Description: "City, town, airport code, or place name",
 				Required:    true,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "view",
+				Description: "How much weather information to show",
+				Required:    false,
+				Choices: []*discordgo.ApplicationCommandOptionChoice{
+					{
+						Name:  "Compact one-line",
+						Value: "compact",
+					},
+					{
+						Name:  "Current weather only",
+						Value: "current",
+					},
+					{
+						Name:  "Today forecast",
+						Value: "today",
+					},
+					{
+						Name:  "Today and tomorrow",
+						Value: "two_days",
+					},
+					{
+						Name:  "Full wttr.in forecast",
+						Value: "full",
+					},
+				},
 			},
 			{
 				Type:        discordgo.ApplicationCommandOptionString,
@@ -61,7 +89,6 @@ func (Weather) Definition() *discordgo.ApplicationCommand {
 	}
 }
 
-// Handle runs when the user executes /weather
 func (Weather) Handle(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	options := discordutil.OptionMap(i.ApplicationCommandData().Options)
 
@@ -77,6 +104,11 @@ func (Weather) Handle(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
+	view := "today"
+	if viewOption, ok := options["view"]; ok {
+		view = viewOption.StringValue()
+	}
+
 	units := "m"
 	if unitsOption, ok := options["units"]; ok {
 		units = unitsOption.StringValue()
@@ -87,11 +119,9 @@ func (Weather) Handle(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		private = privateOption.BoolValue()
 	}
 
-	// Weather calls can take longer than Discord's immediate response window,
-	// so we defer first, then edit the response after curl finishes
 	discordutil.Defer(s, i, private)
 
-	result, err := weather.FetchWttr(location, units)
+	result, err := weather.FetchWttr(location, units, view)
 	if err != nil {
 		discordutil.EditOriginal(
 			s,
@@ -101,23 +131,71 @@ func (Weather) Handle(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	message := fmt.Sprintf("```text\n%s\n```", limitDiscordMessage(result))
-
-	discordutil.EditOriginal(s, i, message)
+	sendWeatherOutput(s, i, result, private)
 }
 
-// limitDiscordMessage keeps the response safely under Discord's message limit.
-//
-// Discord message content supports up to 2000 characters, and we also wrap the
-// response in a code block, so the weather text needs to leave room for that
-func limitDiscordMessage(value string) string {
-	const maxWeatherLength = 1900
+func sendWeatherOutput(s *discordgo.Session, i *discordgo.InteractionCreate, output string, private bool) {
+	chunks := splitForDiscordCodeBlocks(output)
 
-	value = strings.TrimSpace(value)
-
-	if len(value) <= maxWeatherLength {
-		return value
+	if len(chunks) == 0 {
+		discordutil.EditOriginal(s, i, "wttr.in returned no weather output.")
+		return
 	}
 
-	return value[:maxWeatherLength] + "\n...weather output truncated..."
+	discordutil.EditOriginal(s, i, codeBlock(chunks[0]))
+
+	for _, chunk := range chunks[1:] {
+		discordutil.FollowUp(s, i, codeBlock(chunk), private)
+	}
+}
+
+func codeBlock(value string) string {
+	// Prevent accidental closing of our code block if the response ever
+	// contains triple backticks.
+	value = strings.ReplaceAll(value, "```", "`\u200b``")
+
+	return "```text\n" + value + "\n```"
+}
+
+func splitForDiscordCodeBlocks(value string) []string {
+	// Leave room for:
+	//
+	//   ```text
+	//   ...
+	//   ```
+	//
+	// Discord messages max out at 2000 characters, so 1800 gives us a safe
+	// buffer and avoids edge cases with Unicode/weather symbols.
+	const maxRunes = 1800
+
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+
+	var chunks []string
+	var current []rune
+
+	for _, line := range strings.Split(value, "\n") {
+		lineRunes := []rune(line)
+
+		if len(current)+len(lineRunes)+1 > maxRunes && len(current) > 0 {
+			chunks = append(chunks, strings.TrimRight(string(current), "\n"))
+			current = nil
+		}
+
+		for len(lineRunes) > maxRunes {
+			chunks = append(chunks, string(lineRunes[:maxRunes]))
+			lineRunes = lineRunes[maxRunes:]
+		}
+
+		current = append(current, lineRunes...)
+		current = append(current, '\n')
+	}
+
+	if len(current) > 0 {
+		chunks = append(chunks, strings.TrimRight(string(current), "\n"))
+	}
+
+	return chunks
 }

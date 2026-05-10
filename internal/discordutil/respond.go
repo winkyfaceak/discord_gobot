@@ -33,7 +33,7 @@ func Respond(s *discordgo.Session, i *discordgo.InteractionCreate, message strin
 //
 //	"I received the command, but I need more time."
 //
-// Use this for commands that call APIs, databases, curl, or anything slow
+// Use this before slow work such as curl, HTTP APIs, or database calls
 func Defer(s *discordgo.Session, i *discordgo.InteractionCreate, private bool) {
 	flags := discordgo.MessageFlags(0)
 
@@ -53,7 +53,7 @@ func Defer(s *discordgo.Session, i *discordgo.InteractionCreate, private bool) {
 	}
 }
 
-// EditOriginal replaces the deferred "thinking..." response with the final text.
+// EditOriginal replaces the deferred response with final content
 func EditOriginal(s *discordgo.Session, i *discordgo.InteractionCreate, message string) {
 	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 		Content: &message,
@@ -61,5 +61,25 @@ func EditOriginal(s *discordgo.Session, i *discordgo.InteractionCreate, message 
 
 	if err != nil {
 		log.Printf("error editing interaction response: %v", err)
+	}
+}
+
+// FollowUp sends an extra message after the original interaction response.
+//
+// This is useful when the content is too long for one Discord message.
+func FollowUp(s *discordgo.Session, i *discordgo.InteractionCreate, message string, private bool) {
+	flags := discordgo.MessageFlags(0)
+
+	if private {
+		flags = discordgo.MessageFlagsEphemeral
+	}
+
+	_, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+		Content: message,
+		Flags:   flags,
+	})
+
+	if err != nil {
+		log.Printf("error sending follow-up message: %v", err)
 	}
 }

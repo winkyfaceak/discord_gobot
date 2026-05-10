@@ -10,25 +10,34 @@ import (
 	"time"
 )
 
-// FetchWttr uses the local curl command to fetch weather from wttr.in.
+// FetchWttr uses curl to fetch weather from wttr.in
 //
-// We use exec.CommandContext instead of "sh -c" so user input is passed as a
-// normal argument, not as shell code. That is safer for Discord bot input.
-func FetchWttr(location string, units string) (string, error) {
+// location examples:
+//   - Dublin
+//   - New York
+//   - Tokyo
+//   - muc
+//
+// units:
+//   - m = metric, Celsius and km/h
+//   - u = US, Fahrenheit and mph
+//   - M = metric, Celsius and m/s wind
+//
+// view:
+//   - compact  = one-line weather
+//   - current  = current weather only
+//   - today    = current weather + today's forecast
+//   - two_days = current weather + today + tomorrow
+//   - full     = full wttr.in forecast
+func FetchWttr(location string, units string, view string) (string, error) {
 	location = strings.TrimSpace(location)
 	if location == "" {
 		return "", errors.New("location is required")
 	}
 
-	units = normalizeUnits(units)
+	requestURL := buildWttrURL(location, units, view)
 
-	requestURL := buildWttrURL(location, units)
-
-	// Give curl a hard timeout
-	//
-	// The Discord command handler will defer the interaction first, so this
-	// can safely take a few seconds without causing "application did not respond"
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(
@@ -37,7 +46,7 @@ func FetchWttr(location string, units string) (string, error) {
 		"-sS",
 		"--fail",
 		"--max-time",
-		"6",
+		"8",
 		requestURL,
 	)
 
@@ -63,33 +72,38 @@ func FetchWttr(location string, units string) (string, error) {
 	return result, nil
 }
 
-// buildWttrURL builds a wttr.in URL for a location
-//
-// Example:
-//
-//	https://wttr.in/Dublin?format=4&m
-//
-// format=4 gives a compact one-line weather report that fits well in Discord.
-func buildWttrURL(location string, units string) string {
+func buildWttrURL(location string, units string, view string) string {
 	escapedLocation := url.PathEscape(location)
 
-	// wttr.in examples commonly use + for spaces in location names
+	// wttr.in examples use + for spaces in location names.
 	escapedLocation = strings.ReplaceAll(escapedLocation, "%20", "+")
 
+	unitFlag := normalizeUnits(units)
+
+	if view == "compact" {
+		return fmt.Sprintf(
+			"https://wttr.in/%s?format=4&%s",
+			escapedLocation,
+			unitFlag,
+		)
+	}
+
+	viewFlag := normalizeView(view)
+
+	// A = force terminal/ANSI-style weather output
+	// F = hide the "Follow" line
+	// T = turn terminal color sequences off
+	//
+	// Example:
+	//   https://wttr.in/Dublin?m2AFT
 	return fmt.Sprintf(
-		"https://wttr.in/%s?format=4&%s",
+		"https://wttr.in/%s?%s%sAFT",
 		escapedLocation,
-		units,
+		unitFlag,
+		viewFlag,
 	)
 }
 
-// normalizeUnits converts unknown unit values to metric
-//
-// Supported wttr.in unit options:
-//
-//	m = metric, Celsius and km/h
-//	u = USCS, Fahrenheit and mph
-//	M = metric, Celsius and m/s wind
 func normalizeUnits(units string) string {
 	switch units {
 	case "u":
@@ -98,5 +112,20 @@ func normalizeUnits(units string) string {
 		return "M"
 	default:
 		return "m"
+	}
+}
+
+func normalizeView(view string) string {
+	switch view {
+	case "current":
+		return "0"
+	case "today":
+		return "1"
+	case "two_days":
+		return "2"
+	case "full":
+		return ""
+	default:
+		return "1"
 	}
 }
