@@ -150,6 +150,12 @@ func (b *Bot) Run() error {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	<-stop
 
+	for _, cmd := range b.commands {
+		if shutdownCommand, ok := cmd.(commands.ShutdownCommand); ok {
+			shutdownCommand.Shutdown()
+		}
+	}
+
 	log.Println("Bot stopped.")
 	return nil
 }

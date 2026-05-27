@@ -2,7 +2,7 @@
 
 A Docker-ready Discord slash-command bot written in Go, with useful starter
 commands, weather forecasts, and an interactive Deadlock player statistics
-browser.
+browser, plus live Valve/Steam server scoreboards.
 
 ## Features
 
@@ -12,9 +12,12 @@ browser.
 - Interactive Deadlock player lookup powered by
   [Deadlock API](https://deadlock-api.com/), including overview statistics,
   predicted rank, recent matches, current-game status, and build insights.
-- Button-based navigation for Deadlock results, including paginated recent
-  matches and per-user interaction ownership.
-- Optional rendered PNG stat cards for Deadlock overviews using ImageMagick.
+- Image-backed Deadlock dossier cards with button navigation across overview,
+  rank, recent matches, current-game status, builds, and full snapshots,
+  including official hero, rank, and item artwork when exposed by the API.
+- Paginated Deadlock recent matches and per-user interaction ownership.
+- Live Valve server scoreboard sessions rendered as industrial-style cards,
+  with automatic refresh, roster paging, and owner-controlled closure.
 - Container-first deployment with Docker Compose support and graceful shutdown.
 
 ## Commands
@@ -27,6 +30,7 @@ browser.
 | `/add` | Add two integers. | `a`, `b` |
 | `/weather` | Fetch a weather report for a place. | `location`, `view`, `units`, `private` |
 | `/deadlock-statistics` | Browse a player's Deadlock performance and status. | `account`, `view`, `recent-count`, `rank-image`, `interactive`, `image`, `private` |
+| `/server-stats` | Open a live Source server scoreboard session. | `address` |
 
 ### Deadlock Views
 
@@ -41,13 +45,36 @@ The `/deadlock-statistics` command can open directly to:
 | Builds & items | Build insights for the player's top hero. |
 | All snapshot | A broader combined snapshot of available details. |
 
+Interactive Deadlock responses render each view as a dark dossier-style PNG
+card, with Discord buttons to change pages or refresh the data. Available
+Deadlock API artwork is embedded into the card for hero portraits, rank
+badges, and item rows; missing artwork falls back to the text layout. Set
+`interactive:false image:true` to render a single card without navigation.
+
 Example commands:
 
 ```text
 /weather location:Dublin view:today units:m private:true
 /deadlock-statistics account:playername view:overview recent-count:10
 /deadlock-statistics account:playername interactive:false image:true
+/server-stats address:203.0.113.10:27015
 ```
+
+### Live Server Scoreboards
+
+`/server-stats` accepts a public Source query endpoint in `IP:port` form, such
+as `203.0.113.10:27015` or `[2001:db8::10]:27015`. Hostnames and private or
+local-network addresses are rejected.
+
+The command posts a public scoreboard card and updates it every 30 seconds for
+up to 15 minutes. The user who opened the session can browse roster pages,
+request an immediate refresh, or press **Close Session**. Starting a new
+session replaces that user's earlier live scoreboard.
+
+Scoreboards use standard Valve A2S query data: server/game name, map, player
+counts, server flags, latency, and visible roster rows with player name, score,
+and connected duration. Some servers do not expose individual player rows; in
+that case the card still displays the reported player totals and server status.
 
 ## Configuration
 
@@ -57,8 +84,8 @@ Example commands:
 | `GUILD_ID` | No | Registers commands only in one server for faster development iteration. If unset, commands are global. |
 | `APP_ID` | No | Discord application/client ID. If unset, the bot discovers it after connecting. |
 
-The bot opens an outbound Discord websocket connection and does not listen on a
-network port.
+The bot opens outbound Discord/web requests and outbound UDP queries for
+`/server-stats`; it does not listen on a network port.
 
 ## Quick Start With Docker Compose
 
@@ -106,7 +133,7 @@ docker run -d \
 
 The runtime image runs the bot as an unprivileged user and includes `curl` for
 weather lookups plus ImageMagick SVG support and fonts for Deadlock statistics
-cards.
+cards and live server scoreboards.
 
 ## Local Development
 
@@ -114,7 +141,10 @@ Requirements:
 
 - Go 1.26 or newer.
 - `curl` to use `/weather`.
-- ImageMagick with the `magick` executable to use generated Deadlock stat cards.
+- ImageMagick with the `magick` executable to use interactive Deadlock and live
+  server scoreboard cards.
+- Outbound UDP access to the public Source query endpoints used with
+  `/server-stats`.
 
 Run the bot locally:
 
@@ -140,6 +170,7 @@ go test ./...
 |-- internal/config            # Environment-based configuration
 |-- internal/deadlock          # Deadlock API client, summaries, and image cards
 |-- internal/discordutil       # Discord response helpers
+|-- internal/serverstats       # Valve A2S querying and live scoreboard cards
 |-- internal/weather           # wttr.in integration
 |-- Dockerfile
 `-- compose.yaml
@@ -151,3 +182,5 @@ go test ./...
 - [wttr.in](https://wttr.in) for `/weather` results.
 - [Deadlock API](https://deadlock-api.com/) for player, match, rank, build, and
   game-status data.
+- Public Source-compatible game servers queried via Valve A2S UDP packets for
+  `/server-stats` sessions.
