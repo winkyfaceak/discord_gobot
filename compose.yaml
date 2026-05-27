@@ -1,0 +1,11 @@
+services:
+  bot:
+    build:
+      context: .
+    image: discord-gobot:local
+    restart: unless-stopped
+    init: true
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?Set DISCORD_TOKEN before starting the bot}
+      GUILD_ID: ${GUILD_ID:-}
+      APP_ID: ${APP_ID:-}

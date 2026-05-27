@@ -1,0 +1,11 @@
+.git
+.gitignore
+.idea
+.env
+.env.*
+!.env.example
+Dockerfile*
+compose*.yaml
+compose*.yml
+README*
+discord-gobot
