@@ -2,7 +2,10 @@ module discord_gobot
 
 go 1.26
 
-require github.com/bwmarrin/discordgo v0.29.0
+require (
+	github.com/bwmarrin/discordgo v0.29.0
+	github.com/rumblefrog/go-a2s v1.0.2
+)
 
 require (
 	github.com/gorilla/websocket v1.4.2 // indirect

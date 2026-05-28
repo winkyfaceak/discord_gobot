@@ -28,6 +28,11 @@ type ComponentCommand interface {
 	HandleComponent(s *discordgo.Session, i *discordgo.InteractionCreate)
 }
 
+// ShutdownCommand releases long-running command resources when the bot stops.
+type ShutdownCommand interface {
+	Shutdown()
+}
+
 // All returns the complete command list for the bot.
 //
 // To add a new command:
@@ -44,5 +49,6 @@ func All() []Command {
 		Add{},
 		Weather{},
 		NewDeadlockStatistics(deadlockService),
+		NewServerStats(nil, nil),
 	}
 }

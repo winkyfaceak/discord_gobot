@@ -5,6 +5,7 @@ import (
 	deadlockapi "discord_gobot/internal/deadlock"
 	"discord_gobot/internal/discordutil"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -122,7 +123,7 @@ func (d *DeadlockStatistics) Definition() *discordgo.ApplicationCommand {
 			{
 				Type:        discordgo.ApplicationCommandOptionBoolean,
 				Name:        "image",
-				Description: "Render the old PNG stat card instead of buttons. Only used when interactive is false.",
+				Description: "Render the visual PNG card when interactive is false.",
 				Required:    false,
 			},
 			{
@@ -215,25 +216,33 @@ func (d *DeadlockStatistics) Handle(s *discordgo.Session, i *discordgo.Interacti
 		UseRankImage: useRankImage,
 	}
 
-	embed := buildDeadlockEmbed(*summary, state)
-
 	if interactive {
-		discordutil.EditOriginalEmbedWithComponents(s, i, embed, buildDeadlockComponents(state, len(summary.RecentMatches)))
+		components := buildDeadlockComponents(state, len(summary.RecentMatches))
+		if filename, png, imageEmbed, renderErr := renderDeadlockCard(ctx, *summary, state); renderErr == nil {
+			if _, editErr := discordutil.EditOriginalImageWithComponents(s, i, filename, png, imageEmbed, components); editErr == nil {
+				return
+			} else {
+				log.Printf("error sending interactive Deadlock image card: %v", editErr)
+			}
+		} else {
+			log.Printf("error rendering interactive Deadlock image card: %v", renderErr)
+		}
+
+		discordutil.EditOriginalEmbedWithComponents(s, i, buildDeadlockEmbed(*summary, state), components)
 		return
 	}
 
-	if useImage && (view == deadlockViewOverview || view == deadlockViewAll) {
-		png, renderErr := deadlockapi.RenderCardPNG(ctx, *summary)
+	embed := buildDeadlockEmbed(*summary, state)
+	if useImage {
+		filename, png, imageEmbed, renderErr := renderDeadlockCard(ctx, *summary, state)
 		if renderErr == nil {
-			filename := "deadlock-statistics.png"
-			embed.Image = &discordgo.MessageEmbedImage{URL: "attachment://" + filename}
 			discordutil.EditOriginalWithImage(
 				s,
 				i,
 				"Deadlock statistics for **"+summary.Name+"**",
 				filename,
 				png,
-				embed,
+				imageEmbed,
 			)
 			return
 		}
@@ -281,8 +290,36 @@ func (d *DeadlockStatistics) HandleComponent(s *discordgo.Session, i *discordgo.
 	d.storeSession(state.OwnerID, profile, state.RecentLimit, state.UseRankImage)
 
 	state.Page = clampRecentPage(state.Page, len(summary.RecentMatches))
-	embed := buildDeadlockEmbed(*summary, state)
-	discordutil.UpdateComponentMessage(s, i, embed, buildDeadlockComponents(state, len(summary.RecentMatches)))
+	components := buildDeadlockComponents(state, len(summary.RecentMatches))
+	if filename, png, imageEmbed, renderErr := renderDeadlockCard(ctx, *summary, state); renderErr == nil {
+		if editErr := discordutil.UpdateComponentImageWithComponents(s, i, filename, png, imageEmbed, components); editErr == nil {
+			return
+		} else {
+			log.Printf("error updating interactive Deadlock image card: %v", editErr)
+		}
+	} else {
+		log.Printf("error rendering interactive Deadlock image card update: %v", renderErr)
+	}
+
+	discordutil.UpdateComponentMessage(s, i, buildDeadlockEmbed(*summary, state), components)
+}
+
+func renderDeadlockCard(ctx context.Context, summary deadlockapi.PlayerSummary, state deadlockComponentState) (string, []byte, *discordgo.MessageEmbed, error) {
+	filename := fmt.Sprintf("deadlock-%d-%s-%d.png", summary.AccountID, cleanDeadlockView(state.View), time.Now().UnixNano())
+	png, err := deadlockapi.RenderDashboardPNG(ctx, summary, deadlockapi.CardOptions{
+		View:         deadlockapi.CardView(cleanDeadlockView(state.View)),
+		Page:         state.Page,
+		UseRankImage: state.UseRankImage,
+	})
+	if err != nil {
+		return "", nil, nil, err
+	}
+
+	return filename, png, &discordgo.MessageEmbed{
+		URL:   summary.ProfileURL,
+		Color: deadlockEmbedColor(summary),
+		Image: &discordgo.MessageEmbedImage{URL: "attachment://" + filename},
+	}, nil
 }
 
 func deadlockLookupOptionsForView(view string, recentLimit int) deadlockapi.PlayerLookupOptions {
