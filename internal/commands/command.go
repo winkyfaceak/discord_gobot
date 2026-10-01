@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"path/filepath"
+
 	"discord_gobot/internal/config"
 	deadlockapi "discord_gobot/internal/deadlock"
 	"discord_gobot/internal/navidrome"
@@ -55,6 +57,7 @@ func All(cfg config.Config) []Command {
 		Weather{},
 		NewDeadlockStatistics(deadlockapi.NewService(deadlockapi.NewClient(nil))),
 		NewServerStats(nil, nil),
+		NewRemind(filepath.Join(cfg.StateDir, "reminders.json")),
 	}
 
 	if cfg.NavidromeUser != "" {

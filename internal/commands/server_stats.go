@@ -90,7 +90,7 @@ func NewServerStats(querier serverstatsapi.Querier, renderer serverstatsapi.Rend
 		renderer:     renderer,
 		editor:       discordServerStatsEditor{},
 		now:          time.Now,
-		newID:        newServerStatsSessionID,
+		newID:        randomID,
 		refreshEvery: serverStatsRefreshInterval,
 		lifetime:     serverStatsLifetime,
 		sessions:     make(map[string]*serverStatsSession),
@@ -451,7 +451,8 @@ func parseServerStatsCustomID(customID string) (string, string, bool) {
 	return parts[1], parts[2], true
 }
 
-func newServerStatsSessionID() string {
+// randomID returns a short random ID for custom IDs and stored records.
+func randomID() string {
 	bytes := make([]byte, 6)
 	if _, err := rand.Read(bytes); err == nil {
 		return hex.EncodeToString(bytes)

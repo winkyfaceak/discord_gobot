@@ -30,6 +30,7 @@ scoreboards, and music from a Navidrome library played in voice channels.
 | `/weather` | Fetch a weather report for a place. | `location`, `view`, `units`, `private` |
 | `/deadlock-statistics` | Browse a player's Deadlock performance and status. | `account`, `view`, `recent-count`, `rank-image`, `interactive`, `image`, `private` |
 | `/server-stats` | Open a live Source server scoreboard session. | `address` |
+| `/remind` | Ping someone (or yourself) in the channel later. Survives restarts. | `when` (`20m`, `1h30m`, `2 days`, `18:30`, `6pm`), `what`, `who` |
 | `/music play` / `skip` / `queue` / `stop` | Play songs and albums from Navidrome in your voice channel. | `search` (autocompletes from the library) |
 
 ### Deadlock Views
@@ -85,6 +86,7 @@ that case the card still displays the reported player totals and server status.
 | `NAVIDROME_USER` | No | Navidrome login for `/music`. Without it, `/music` isn't registered. |
 | `NAVIDROME_PASSWORD` | With `NAVIDROME_USER` | Password for that Navidrome login. |
 | `NAVIDROME_URL` | No | Navidrome address. Defaults to `http://127.0.0.1:4533`. |
+| `STATE_DIRECTORY` | No | Where `/remind` saves reminders (`reminders.json`). Set by systemd's `StateDirectory=`; defaults to the working directory. |
 
 The bot opens outbound Discord/web requests, outbound UDP for voice and
 `/server-stats`, and talks to Navidrome; it does not listen on a network port.

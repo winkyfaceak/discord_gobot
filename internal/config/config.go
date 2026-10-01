@@ -33,19 +33,25 @@ type Config struct {
 	NavidromeURL      string
 	NavidromeUser     string
 	NavidromePassword string
+
+	// StateDir is where the bot keeps data across restarts (reminders).
+	// systemd's StateDirectory= sets STATE_DIRECTORY; defaults to the
+	// working directory.
+	StateDir string
 }
 
 // Load reads configuration from environment variables
 //
 // Required: DISCORD_TOKEN
 // Optional: GUILD_ID, NAVIDROME_URL (default http://127.0.0.1:4533),
-// NAVIDROME_USER, NAVIDROME_PASSWORD
+// NAVIDROME_USER, NAVIDROME_PASSWORD, STATE_DIRECTORY
 func Load() (Config, error) {
 	cfg := Config{
 		Token:             strings.TrimSpace(os.Getenv("DISCORD_TOKEN")),
 		NavidromeURL:      strings.TrimSpace(os.Getenv("NAVIDROME_URL")),
 		NavidromeUser:     strings.TrimSpace(os.Getenv("NAVIDROME_USER")),
 		NavidromePassword: os.Getenv("NAVIDROME_PASSWORD"),
+		StateDir:          os.Getenv("STATE_DIRECTORY"),
 	}
 
 	// The bot cannot run without a token, so fail early with a clear message
@@ -59,6 +65,10 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("GUILD_ID is not a valid server ID: %w", err)
 		}
 		cfg.GuildID = id
+	}
+
+	if cfg.StateDir == "" {
+		cfg.StateDir = "."
 	}
 
 	if cfg.NavidromeURL == "" {
