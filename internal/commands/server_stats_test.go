@@ -10,7 +10,7 @@ import (
 
 	serverstatsapi "discord_gobot/internal/serverstats"
 
-	"github.com/bwmarrin/discordgo"
+	"github.com/disgoorg/disgo/discord"
 )
 
 type fakeServerStatsQueryResult struct {
@@ -58,8 +58,7 @@ func (r *fakeServerStatsRenderer) statuses() []serverstatsapi.CardStatus {
 }
 
 type fakeServerStatsUpdate struct {
-	status     serverstatsapi.CardStatus
-	components []discordgo.MessageComponent
+	components []discord.LayoutComponent
 }
 
 type fakeServerStatsEditor struct {
@@ -69,13 +68,13 @@ type fakeServerStatsEditor struct {
 	updateErr error
 }
 
-func (e *fakeServerStatsEditor) create(_ *discordgo.Session, _ *discordgo.InteractionCreate, _ string, _ []byte, _ serverstatsapi.CardStatus, _ []discordgo.MessageComponent) (*discordgo.Message, error) {
-	return &discordgo.Message{ID: "message", ChannelID: "channel"}, nil
+func (e *fakeServerStatsEditor) create(_ *serverStatsSession, _ discord.MessageUpdate) (*discord.Message, error) {
+	return &discord.Message{ID: 1, ChannelID: 2}, nil
 }
 
-func (e *fakeServerStatsEditor) update(_ *discordgo.Session, _ *discordgo.InteractionCreate, _ string, _ string, _ string, _ []byte, status serverstatsapi.CardStatus, components []discordgo.MessageComponent) error {
+func (e *fakeServerStatsEditor) update(_ *serverStatsSession, update discord.MessageUpdate) error {
 	e.mu.Lock()
-	e.updates = append(e.updates, fakeServerStatsUpdate{status: status, components: components})
+	e.updates = append(e.updates, fakeServerStatsUpdate{components: *update.Components})
 	e.mu.Unlock()
 	if e.notify != nil {
 		select {
@@ -100,8 +99,8 @@ func newTestServerStatsSession(id string, ownerID string) *serverStatsSession {
 		id:        id,
 		ownerID:   ownerID,
 		endpoint:  serverstatsapi.Endpoint{Address: "203.0.113.10:27015"},
-		channelID: "channel",
-		messageID: "message",
+		channelID: 2,
+		messageID: 1,
 		expiresAt: time.Now().Add(time.Hour),
 		ctx:       ctx,
 		cancel:    cancel,

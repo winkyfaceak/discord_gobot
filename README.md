@@ -1,8 +1,8 @@
 # Discord Go Bot
 
-A Discord slash-command bot written in Go, with useful starter
-commands, weather forecasts, and an interactive Deadlock player statistics
-browser, plus live Valve/Steam server scoreboards.
+A Discord slash-command bot written in Go, with weather forecasts, an
+interactive Deadlock player statistics browser, live Valve/Steam server
+scoreboards, and music from a Navidrome library played in voice channels.
 
 ## Features
 
@@ -18,6 +18,8 @@ browser, plus live Valve/Steam server scoreboards.
 - Paginated Deadlock recent matches and per-user interaction ownership.
 - Live Valve server scoreboard sessions rendered as industrial-style cards,
   with automatic refresh, roster paging, and owner-controlled closure.
+- Music from your own Navidrome library in voice channels, with library
+  autocomplete, a queue, and "now playing" cards.
 - Runs as a NixOS systemd service with graceful shutdown.
 
 ## Commands
@@ -25,12 +27,10 @@ browser, plus live Valve/Steam server scoreboards.
 | Command | Description | Notable Options |
 | --- | --- | --- |
 | `/ping` | Check that the bot is online. | None |
-| `/hello` | Send a greeting. | `name` |
-| `/echo` | Repeat text back in Discord. | `text`, `private` |
-| `/add` | Add two integers. | `a`, `b` |
 | `/weather` | Fetch a weather report for a place. | `location`, `view`, `units`, `private` |
 | `/deadlock-statistics` | Browse a player's Deadlock performance and status. | `account`, `view`, `recent-count`, `rank-image`, `interactive`, `image`, `private` |
 | `/server-stats` | Open a live Source server scoreboard session. | `address` |
+| `/music play` / `skip` / `queue` / `stop` | Play songs and albums from Navidrome in your voice channel. | `search` (autocompletes from the library) |
 
 ### Deadlock Views
 
@@ -82,23 +82,49 @@ that case the card still displays the reported player totals and server status.
 | --- | --- | --- |
 | `DISCORD_TOKEN` | Yes | Raw Discord bot token from the Developer Portal. Do not include the `Bot ` prefix. |
 | `GUILD_ID` | No | Registers commands only in one server for faster development iteration. If unset, commands are global. |
-| `APP_ID` | No | Discord application/client ID. If unset, the bot discovers it after connecting. |
+| `NAVIDROME_USER` | No | Navidrome login for `/music`. Without it, `/music` isn't registered. |
+| `NAVIDROME_PASSWORD` | With `NAVIDROME_USER` | Password for that Navidrome login. |
+| `NAVIDROME_URL` | No | Navidrome address. Defaults to `http://127.0.0.1:4533`. |
 
-The bot opens outbound Discord/web requests and outbound UDP queries for
-`/server-stats`; it does not listen on a network port.
+The bot opens outbound Discord/web requests, outbound UDP for voice and
+`/server-stats`, and talks to Navidrome; it does not listen on a network port.
+
+### Music
+
+`/music play` joins your voice channel and plays the song or album you pick
+from the autocomplete list (or the best match for free text), posting a "now
+playing" card with the cover for each song. Navidrome transcodes to Opus, so
+the bot only forwards audio. It leaves after 5 minutes with nothing queued.
+The bot needs Connect and Speak in the voice channel, and Send Messages,
+Embed Links and Attach Files in the text channel.
+
+The app must be added to the server as a bot, not just with
+`applications.commands` (that gives working slash commands but no bot member,
+so it can't join voice). Invite link with the `bot` scope and those
+permissions, using the Application ID from the Developer Portal:
+
+```text
+https://discord.com/oauth2/authorize?client_id=APPLICATION_ID&scope=bot+applications.commands&permissions=36752384
+```
 
 ## Deployment (NixOS home lab)
 
 The bot runs as the `discord-bot` systemd service, defined in
 `discord-bot.nix` in the [homelab](https://github.com/winkyfaceak/homelab)
-repo. That file has the update and token commands. Runtime needs are
-ImageMagick (with librsvg) and the DejaVu fonts, both provided by the service.
+repo. That file has the update and secrets commands. Runtime needs are
+ImageMagick (with librsvg), the DejaVu fonts and Discord's
+[libdave](https://github.com/discord/libdave), all provided by the service.
 
 ## Local Development
 
 Requirements:
 
 - Go 1.26 or newer.
+- [libdave](https://github.com/discord/libdave) v1.1.0 (Discord's voice
+  encryption library) findable by `pkg-config` as `dave`. godave's
+  [install script](https://github.com/disgoorg/godave#libdave-installation)
+  sets this up. The packages under `internal/` (and their tests) build
+  without it; only the final binary links it.
 - ImageMagick with the `magick` executable and SVG support to use interactive
   Deadlock and live server scoreboard cards. Card text uses the DejaVu Sans font.
 - Outbound UDP access to the public Source query endpoints used with
@@ -127,6 +153,7 @@ go test ./...
 |-- internal/config            # Environment-based configuration
 |-- internal/deadlock          # Deadlock API client, summaries, and image cards
 |-- internal/discordutil       # Discord response helpers
+|-- internal/navidrome         # Navidrome (Subsonic) client and Opus stream reader
 |-- internal/serverstats       # Valve A2S querying and live scoreboard cards
 `-- internal/weather           # wttr.in integration
 ```
@@ -139,3 +166,4 @@ go test ./...
   game-status data.
 - Public Source-compatible game servers queried via Valve A2S UDP packets for
   `/server-stats` sessions.
+- A [Navidrome](https://www.navidrome.org/) server for `/music`.

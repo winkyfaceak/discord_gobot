@@ -10,7 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bwmarrin/discordgo"
+	"github.com/disgoorg/disgo/discord"
+	"github.com/disgoorg/disgo/events"
 )
 
 const (
@@ -32,6 +33,9 @@ const (
 	deadlockColorRed     = 0xed4245
 	deadlockColorNeutral = 0x5865f2
 )
+
+// inline marks embed fields that sit side by side
+var inline = new(true)
 
 // DeadlockStatistics implements the /deadlock-statistics command.
 type DeadlockStatistics struct {
@@ -61,23 +65,20 @@ func (d *DeadlockStatistics) ComponentPrefix() string {
 }
 
 // Definition tells Discord how the slash command should appear.
-func (d *DeadlockStatistics) Definition() *discordgo.ApplicationCommand {
-	return &discordgo.ApplicationCommand{
+func (d *DeadlockStatistics) Definition() discord.SlashCommandCreate {
+	return discord.SlashCommandCreate{
 		Name:        "deadlock-statistics",
 		Description: "Interactive Deadlock player statistics, rank, recent games, current game, and builds.",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Type:        discordgo.ApplicationCommandOptionString,
+		Options: []discord.ApplicationCommandOption{
+			discord.ApplicationCommandOptionString{
 				Name:        "account",
 				Description: "Steam account/persona name to search for.",
 				Required:    true,
 			},
-			{
-				Type:        discordgo.ApplicationCommandOptionString,
+			discord.ApplicationCommandOptionString{
 				Name:        "view",
 				Description: "Initial page to open. Buttons let you switch pages after that.",
-				Required:    false,
-				Choices: []*discordgo.ApplicationCommandOptionChoice{
+				Choices: []discord.ApplicationCommandOptionChoiceString{
 					{Name: "Overview", Value: deadlockViewOverview},
 					{Name: "Rank image", Value: deadlockViewRank},
 					{Name: "Recent games", Value: deadlockViewRecent},
@@ -86,106 +87,77 @@ func (d *DeadlockStatistics) Definition() *discordgo.ApplicationCommand {
 					{Name: "All snapshot", Value: deadlockViewAll},
 				},
 			},
-			{
-				Type:        discordgo.ApplicationCommandOptionInteger,
+			discord.ApplicationCommandOptionInt{
 				Name:        "recent-count",
 				Description: "How many recent games to keep available, from 1 to 20. Defaults to 10.",
-				Required:    false,
-				MinValue:    new(1.0),
-				MaxValue:    maxDeadlockRecentLimit,
+				MinValue:    new(1),
+				MaxValue:    new(maxDeadlockRecentLimit),
 			},
-			{
-				Type:        discordgo.ApplicationCommandOptionBoolean,
+			discord.ApplicationCommandOptionBool{
 				Name:        "rank-image",
 				Description: "Show the rank badge image when rank is displayed. Defaults to true.",
-				Required:    false,
 			},
-			{
-				Type:        discordgo.ApplicationCommandOptionBoolean,
+			discord.ApplicationCommandOptionBool{
 				Name:        "interactive",
 				Description: "Show Discord buttons for page navigation. Defaults to true.",
-				Required:    false,
 			},
-			{
-				Type:        discordgo.ApplicationCommandOptionBoolean,
+			discord.ApplicationCommandOptionBool{
 				Name:        "image",
 				Description: "Render the visual PNG card when interactive is false.",
-				Required:    false,
 			},
-			{
-				Type:        discordgo.ApplicationCommandOptionBoolean,
+			discord.ApplicationCommandOptionBool{
 				Name:        "private",
 				Description: "Only show the result to you.",
-				Required:    false,
 			},
 		},
 	}
 }
 
 // Handle runs when someone executes /deadlock-statistics.
-func (d *DeadlockStatistics) Handle(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	options := discordutil.OptionMap(i.ApplicationCommandData().Options)
+func (d *DeadlockStatistics) Handle(e *events.ApplicationCommandInteractionCreate) {
+	data := e.SlashCommandInteractionData()
 
-	accountOption, ok := options["account"]
-	if !ok {
-		discordutil.Respond(s, i, "Missing required input: account", true)
-		return
-	}
-
-	accountName := strings.TrimSpace(accountOption.StringValue())
+	accountName := strings.TrimSpace(data.String("account"))
 	if accountName == "" {
-		discordutil.Respond(s, i, "Account name cannot be empty.", true)
+		discordutil.Reply(e, "Account name cannot be empty.", true)
 		return
 	}
 
-	view := deadlockViewOverview
-	if viewOption, ok := options["view"]; ok {
-		view = cleanDeadlockView(viewOption.StringValue())
-	}
+	view := cleanDeadlockView(data.String("view"))
 
-	recentLimit := defaultDeadlockRecentLimit
-	if recentOption, ok := options["recent-count"]; ok {
-		recentLimit = int(recentOption.IntValue())
+	recentLimit, ok := data.OptInt("recent-count")
+	if !ok {
+		recentLimit = defaultDeadlockRecentLimit
 	}
 	recentLimit = min(max(recentLimit, 1), maxDeadlockRecentLimit)
 
-	useRankImage := true
-	if rankImageOption, ok := options["rank-image"]; ok {
-		useRankImage = rankImageOption.BoolValue()
+	useRankImage, ok := data.OptBool("rank-image")
+	if !ok {
+		useRankImage = true
 	}
-
-	interactive := true
-	if interactiveOption, ok := options["interactive"]; ok {
-		interactive = interactiveOption.BoolValue()
+	interactive, ok := data.OptBool("interactive")
+	if !ok {
+		interactive = true
 	}
+	useImage := data.Bool("image")
+	private := data.Bool("private")
 
-	useImage := false
-	if imageOption, ok := options["image"]; ok {
-		useImage = imageOption.BoolValue()
+	if err := e.DeferCreateMessage(private); err != nil {
+		log.Printf("error deferring /deadlock-statistics: %v", err)
+		return
 	}
-
-	private := false
-	if privateOption, ok := options["private"]; ok {
-		private = privateOption.BoolValue()
-	}
-
-	discordutil.Defer(s, i, private)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	summary, err := d.service.LookupPlayerWithOptions(ctx, accountName, deadlockLookupOptionsForView(view, recentLimit))
 	if err != nil {
-		discordutil.EditOriginal(
-			s,
-			i,
-			fmt.Sprintf("Could not get Deadlock statistics for `%s`: %v", accountName, err),
-		)
+		discordutil.EditText(e, fmt.Sprintf("Could not get Deadlock statistics for `%s`: %v", accountName, err))
 		return
 	}
 
 	state := deadlockComponentState{
-		OwnerID:      interactionUserID(i),
+		OwnerID:      interactionUserID(e),
 		AccountID:    summary.AccountID,
 		View:         view,
 		Page:         0,
@@ -193,103 +165,90 @@ func (d *DeadlockStatistics) Handle(s *discordgo.Session, i *discordgo.Interacti
 		UseRankImage: useRankImage,
 	}
 
+	var components []discord.LayoutComponent
 	if interactive {
-		components := buildDeadlockComponents(state, len(summary.RecentMatches))
-		if filename, png, imageEmbed, renderErr := renderDeadlockCard(ctx, *summary, state); renderErr == nil {
-			if _, editErr := discordutil.EditOriginalImageWithComponents(s, i, filename, png, imageEmbed, components); editErr == nil {
+		components = buildDeadlockComponents(state, len(summary.RecentMatches))
+	}
+
+	if interactive || useImage {
+		update, renderErr := renderDeadlockCard(ctx, *summary, state, components)
+		if renderErr == nil {
+			if !interactive {
+				content := "Deadlock statistics for **" + summary.Name + "**"
+				update.Content = &content
+			}
+			if _, err := discordutil.EditOriginal(e, update); err == nil {
 				return
 			} else {
-				log.Printf("error sending interactive Deadlock image card: %v", editErr)
+				log.Printf("error sending Deadlock image card: %v", err)
 			}
 		} else {
-			log.Printf("error rendering interactive Deadlock image card: %v", renderErr)
-		}
-
-		discordutil.EditOriginalEmbedWithComponents(s, i, buildDeadlockEmbed(*summary, state), components)
-		return
-	}
-
-	embed := buildDeadlockEmbed(*summary, state)
-	if useImage {
-		filename, png, imageEmbed, renderErr := renderDeadlockCard(ctx, *summary, state)
-		if renderErr == nil {
-			discordutil.EditOriginalWithImage(
-				s,
-				i,
-				"Deadlock statistics for **"+summary.Name+"**",
-				filename,
-				png,
-				imageEmbed,
-			)
-			return
+			log.Printf("error rendering Deadlock image card: %v", renderErr)
 		}
 	}
 
-	discordutil.EditOriginalEmbed(s, i, embed)
+	if _, err := discordutil.EditOriginal(e, discordutil.EmbedUpdate(buildDeadlockEmbed(*summary, state), components)); err != nil {
+		log.Printf("error sending Deadlock embed: %v", err)
+	}
 }
 
-func (d *DeadlockStatistics) HandleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	state, err := parseDeadlockComponentState(i.MessageComponentData().CustomID)
+func (d *DeadlockStatistics) HandleComponent(e *events.ComponentInteractionCreate) {
+	state, err := parseDeadlockComponentState(e.Data.CustomID())
 	if err != nil {
-		discordutil.RespondEphemeralToComponent(s, i, "That Deadlock menu is too old or invalid. Run `/deadlock-statistics` again.")
+		discordutil.Reply(e, "That Deadlock menu is too old or invalid. Run `/deadlock-statistics` again.", true)
 		return
 	}
 
-	clickerID := interactionUserID(i)
-	if state.OwnerID != "" && clickerID != "" && state.OwnerID != clickerID {
-		discordutil.RespondEphemeralToComponent(s, i, "This Deadlock menu belongs to the user who opened it. Run your own `/deadlock-statistics` command to browse freely.")
+	if state.OwnerID != "" && state.OwnerID != interactionUserID(e) {
+		discordutil.Reply(e, "This Deadlock menu belongs to the user who opened it. Run your own `/deadlock-statistics` command to browse freely.", true)
 		return
 	}
 
-	discordutil.DeferComponentUpdate(s, i)
+	if err := e.DeferUpdateMessage(); err != nil {
+		log.Printf("error deferring Deadlock button: %v", err)
+		return
+	}
 
 	profile := deadlockapi.SteamProfile{AccountID: state.AccountID}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	var update discord.MessageUpdate
 	summary, err := d.service.LookupPlayerByProfile(ctx, profile, deadlockLookupOptionsForView(state.View, state.RecentLimit))
 	if err != nil {
-		discordutil.UpdateComponentMessage(
-			s,
-			i,
-			buildDeadlockErrorEmbed(profile, err),
-			buildDeadlockComponents(state, 0),
-		)
-		return
-	}
-
-	state.Page = clampRecentPage(state.Page, len(summary.RecentMatches))
-	components := buildDeadlockComponents(state, len(summary.RecentMatches))
-	if filename, png, imageEmbed, renderErr := renderDeadlockCard(ctx, *summary, state); renderErr == nil {
-		if _, editErr := discordutil.EditOriginalImageWithComponents(s, i, filename, png, imageEmbed, components); editErr == nil {
-			return
-		} else {
-			log.Printf("error updating interactive Deadlock image card: %v", editErr)
-		}
+		update = discordutil.EmbedUpdate(buildDeadlockErrorEmbed(profile, err), buildDeadlockComponents(state, 0))
 	} else {
-		log.Printf("error rendering interactive Deadlock image card update: %v", renderErr)
+		state.Page = clampRecentPage(state.Page, len(summary.RecentMatches))
+		components := buildDeadlockComponents(state, len(summary.RecentMatches))
+		if card, renderErr := renderDeadlockCard(ctx, *summary, state, components); renderErr == nil {
+			update = card
+		} else {
+			log.Printf("error rendering Deadlock image card update: %v", renderErr)
+			update = discordutil.EmbedUpdate(buildDeadlockEmbed(*summary, state), components)
+		}
 	}
 
-	discordutil.UpdateComponentMessage(s, i, buildDeadlockEmbed(*summary, state), components)
+	if _, err := discordutil.EditOriginal(e, update); err != nil {
+		log.Printf("error updating Deadlock card: %v", err)
+	}
 }
 
-func renderDeadlockCard(ctx context.Context, summary deadlockapi.PlayerSummary, state deadlockComponentState) (string, []byte, *discordgo.MessageEmbed, error) {
-	filename := fmt.Sprintf("deadlock-%d-%s-%d.png", summary.AccountID, cleanDeadlockView(state.View), time.Now().UnixNano())
+func renderDeadlockCard(ctx context.Context, summary deadlockapi.PlayerSummary, state deadlockComponentState, components []discord.LayoutComponent) (discord.MessageUpdate, error) {
+	view := cleanDeadlockView(state.View)
 	png, err := deadlockapi.RenderDashboardPNG(ctx, summary, deadlockapi.CardOptions{
-		View:         deadlockapi.CardView(cleanDeadlockView(state.View)),
+		View:         deadlockapi.CardView(view),
 		Page:         state.Page,
 		UseRankImage: state.UseRankImage,
 	})
 	if err != nil {
-		return "", nil, nil, err
+		return discord.MessageUpdate{}, err
 	}
 
-	return filename, png, &discordgo.MessageEmbed{
-		URL:   summary.ProfileURL,
-		Color: deadlockEmbedColor(summary),
-		Image: &discordgo.MessageEmbedImage{URL: "attachment://" + filename},
-	}, nil
+	filename := fmt.Sprintf("deadlock-%d-%s-%d.png", summary.AccountID, view, time.Now().UnixNano())
+	embed := discord.Embed{URL: summary.ProfileURL, Color: deadlockEmbedColor(summary)}
+	alt := fmt.Sprintf("Deadlock %s card for %s", view, summary.Name)
+	return discordutil.ImageUpdate(filename, alt, png, embed, components), nil
 }
 
 func deadlockLookupOptionsForView(view string, recentLimit int) deadlockapi.PlayerLookupOptions {
@@ -301,7 +260,7 @@ func deadlockLookupOptionsForView(view string, recentLimit int) deadlockapi.Play
 	}
 }
 
-func buildDeadlockEmbed(summary deadlockapi.PlayerSummary, state deadlockComponentState) *discordgo.MessageEmbed {
+func buildDeadlockEmbed(summary deadlockapi.PlayerSummary, state deadlockComponentState) discord.Embed {
 	switch state.View {
 	case deadlockViewRank:
 		return buildDeadlockRankEmbedFromSummary(summary, state.UseRankImage)
@@ -318,106 +277,105 @@ func buildDeadlockEmbed(summary deadlockapi.PlayerSummary, state deadlockCompone
 	}
 }
 
-func buildDeadlockOverviewEmbed(summary deadlockapi.PlayerSummary) *discordgo.MessageEmbed {
+func buildDeadlockOverviewEmbed(summary deadlockapi.PlayerSummary) discord.Embed {
 	fields := summaryFields(summary)
 
 	recent := formatRecentDeadlockMatches(summary.RecentMatches[:min(len(summary.RecentMatches), 3)])
 	if recent != "" {
-		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   "🕘 Latest Games",
-			Value:  recent,
-			Inline: false,
+		fields = append(fields, discord.EmbedField{
+			Name:  "🕘 Latest Games",
+			Value: recent,
 		})
 	}
 
-	embed := &discordgo.MessageEmbed{
+	embed := discord.Embed{
 		Title:       "🟧 Deadlock Player Hub • " + summary.Name,
 		Description: deadlockSummaryDescription(summary, "Use the buttons below to jump between rank, recent games, live status, and builds."),
 		URL:         summary.ProfileURL,
 		Color:       deadlockEmbedColor(summary),
 		Fields:      fields,
-		Footer: &discordgo.MessageEmbedFooter{
+		Footer: &discord.EmbedFooter{
 			Text: "Overview • Rank • Recent • Current game • Builds & items",
 		},
 	}
 
 	if summary.TopHeroIconURL != "" {
-		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: summary.TopHeroIconURL}
+		embed.Thumbnail = &discord.EmbedResource{URL: summary.TopHeroIconURL}
 	} else if summary.Avatar != "" {
-		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: summary.Avatar}
+		embed.Thumbnail = &discord.EmbedResource{URL: summary.Avatar}
 	}
 
 	return embed
 }
 
-func buildDeadlockAllSnapshotEmbed(summary deadlockapi.PlayerSummary, useRankImage bool) *discordgo.MessageEmbed {
+func buildDeadlockAllSnapshotEmbed(summary deadlockapi.PlayerSummary, useRankImage bool) discord.Embed {
 	fields := summaryFields(summary)
 	fields = append(fields, rankFieldFromSummary(summary), currentGameFieldFromSummary(summary), buildFieldFromSummary(summary))
 
 	recent := formatRecentDeadlockMatches(summary.RecentMatches[:min(len(summary.RecentMatches), 5)])
 	if recent != "" {
-		fields = append(fields, &discordgo.MessageEmbedField{Name: "🕘 Recent Form", Value: recent, Inline: false})
+		fields = append(fields, discord.EmbedField{Name: "🕘 Recent Form", Value: recent})
 	}
 
-	embed := &discordgo.MessageEmbed{
+	embed := discord.Embed{
 		Title:       "✨ Deadlock Snapshot • " + summary.Name,
 		Description: deadlockSummaryDescription(summary, "Full snapshot can be slower because it checks multiple Deadlock API sections."),
 		URL:         summary.ProfileURL,
 		Color:       deadlockEmbedColor(summary),
 		Fields:      fields,
-		Footer:      &discordgo.MessageEmbedFooter{Text: "Snapshot includes overview, rank, current game, builds, and recent form."},
+		Footer:      &discord.EmbedFooter{Text: "Snapshot includes overview, rank, current game, builds, and recent form."},
 	}
 
 	if useRankImage && summary.Rank != nil && summary.Rank.ImageURL != "" {
-		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: summary.Rank.ImageURL}
+		embed.Thumbnail = &discord.EmbedResource{URL: summary.Rank.ImageURL}
 	} else if summary.TopHeroIconURL != "" {
-		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: summary.TopHeroIconURL}
+		embed.Thumbnail = &discord.EmbedResource{URL: summary.TopHeroIconURL}
 	} else if summary.Avatar != "" {
-		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: summary.Avatar}
+		embed.Thumbnail = &discord.EmbedResource{URL: summary.Avatar}
 	}
 
 	return embed
 }
 
-func summaryFields(summary deadlockapi.PlayerSummary) []*discordgo.MessageEmbedField {
+func summaryFields(summary deadlockapi.PlayerSummary) []discord.EmbedField {
 	topHero := fmt.Sprintf("Hero ID `%d`", summary.TopHeroID)
 	if summary.TopHeroName != "" {
 		topHero = fmt.Sprintf("**%s**\n`Hero %d`", summary.TopHeroName, summary.TopHeroID)
 	}
 	topHero += fmt.Sprintf("\n%s matches • **%.1f%% WR**", formatInt(summary.TopHeroMatches), summary.TopHeroWinRate)
 
-	return []*discordgo.MessageEmbedField{
-		{Name: "🏆 Record", Value: fmt.Sprintf("**%dW / %dL**\n%s", summary.Wins, summary.Losses, formatRecordDifferential(summary.Wins, summary.Losses)), Inline: true},
-		{Name: "📈 Win Rate", Value: fmt.Sprintf("**%.1f%%**\n%s", summary.WinRate, formatWinRateLabel(summary.WinRate, summary.Matches)), Inline: true},
-		{Name: "🎭 Top Hero", Value: topHero, Inline: true},
-		{Name: "⚔️ Avg KDA", Value: fmt.Sprintf("**%.1f / %.1f / %.1f**", summary.AvgKills, summary.AvgDeaths, summary.AvgAssists), Inline: true},
-		{Name: "💰 Avg Souls", Value: fmt.Sprintf("**%s**", formatInt(int(summary.AvgNetWorth))), Inline: true},
-		{Name: "🎯 LH / Denies", Value: fmt.Sprintf("**%.1f / %.1f**", summary.AvgLastHits, summary.AvgDenies), Inline: true},
+	return []discord.EmbedField{
+		{Name: "🏆 Record", Value: fmt.Sprintf("**%dW / %dL**\n%s", summary.Wins, summary.Losses, formatRecordDifferential(summary.Wins, summary.Losses)), Inline: inline},
+		{Name: "📈 Win Rate", Value: fmt.Sprintf("**%.1f%%**\n%s", summary.WinRate, formatWinRateLabel(summary.WinRate, summary.Matches)), Inline: inline},
+		{Name: "🎭 Top Hero", Value: topHero, Inline: inline},
+		{Name: "⚔️ Avg KDA", Value: fmt.Sprintf("**%.1f / %.1f / %.1f**", summary.AvgKills, summary.AvgDeaths, summary.AvgAssists), Inline: inline},
+		{Name: "💰 Avg Souls", Value: fmt.Sprintf("**%s**", formatInt(int(summary.AvgNetWorth))), Inline: inline},
+		{Name: "🎯 LH / Denies", Value: fmt.Sprintf("**%.1f / %.1f**", summary.AvgLastHits, summary.AvgDenies), Inline: inline},
 	}
 }
 
-func buildDeadlockRankEmbedFromSummary(summary deadlockapi.PlayerSummary, useRankImage bool) *discordgo.MessageEmbed {
-	fields := []*discordgo.MessageEmbedField{rankFieldFromSummary(summary)}
+func buildDeadlockRankEmbedFromSummary(summary deadlockapi.PlayerSummary, useRankImage bool) discord.Embed {
+	fields := []discord.EmbedField{rankFieldFromSummary(summary)}
 
-	embed := &discordgo.MessageEmbed{
+	embed := discord.Embed{
 		Title:       "🏅 Deadlock Rank • " + summary.Name,
 		Description: deadlockSummaryDescription(summary, "Rank is a Deadlock API ML prediction, not hidden MMR."),
 		URL:         summary.ProfileURL,
 		Color:       deadlockEmbedColor(summary),
 		Fields:      fields,
-		Footer:      &discordgo.MessageEmbedFooter{Text: "Rank badges are prediction data from the Deadlock API."},
+		Footer:      &discord.EmbedFooter{Text: "Rank badges are prediction data from the Deadlock API."},
 	}
 
 	if useRankImage && summary.Rank != nil && summary.Rank.ImageURL != "" {
-		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: summary.Rank.ImageURL}
+		embed.Thumbnail = &discord.EmbedResource{URL: summary.Rank.ImageURL}
 	} else if summary.Avatar != "" {
-		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: summary.Avatar}
+		embed.Thumbnail = &discord.EmbedResource{URL: summary.Avatar}
 	}
 
 	return embed
 }
 
-func buildDeadlockRecentEmbed(summary deadlockapi.PlayerSummary, state deadlockComponentState) *discordgo.MessageEmbed {
+func buildDeadlockRecentEmbed(summary deadlockapi.PlayerSummary, state deadlockComponentState) discord.Embed {
 	page := clampRecentPage(state.Page, len(summary.RecentMatches))
 	start := page * deadlockRecentPageSize
 	end := min(start+deadlockRecentPageSize, len(summary.RecentMatches))
@@ -431,61 +389,60 @@ func buildDeadlockRecentEmbed(summary deadlockapi.PlayerSummary, state deadlockC
 		totalPages = (len(summary.RecentMatches) + deadlockRecentPageSize - 1) / deadlockRecentPageSize
 	}
 
-	fields := []*discordgo.MessageEmbedField{
-		{Name: "Match Cards", Value: emptyFallback(formatRecentDeadlockMatches(pageMatches), "No recent games returned."), Inline: false},
+	fields := []discord.EmbedField{
+		{Name: "Match Cards", Value: emptyFallback(formatRecentDeadlockMatches(pageMatches), "No recent games returned.")},
 	}
 
-	embed := &discordgo.MessageEmbed{
+	embed := discord.Embed{
 		Title:       "🕘 Recent Deadlock Games • " + summary.Name,
 		Description: fmt.Sprintf("%s\nPage `%d/%d`", deadlockSummaryDescription(summary, ""), page+1, totalPages),
 		URL:         summary.ProfileURL,
 		Color:       deadlockEmbedColor(summary),
 		Fields:      fields,
-		Footer:      &discordgo.MessageEmbedFooter{Text: "Use ◀ and ▶ to browse recent matches."},
+		Footer:      &discord.EmbedFooter{Text: "Use ◀ and ▶ to browse recent matches."},
 	}
 
 	if len(pageMatches) > 0 && pageMatches[0].HeroIconURL != "" {
-		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: pageMatches[0].HeroIconURL}
+		embed.Thumbnail = &discord.EmbedResource{URL: pageMatches[0].HeroIconURL}
 	} else if summary.Avatar != "" {
-		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: summary.Avatar}
+		embed.Thumbnail = &discord.EmbedResource{URL: summary.Avatar}
 	}
 
 	return embed
 }
 
-func buildDeadlockCurrentGameEmbedFromSummary(summary deadlockapi.PlayerSummary) *discordgo.MessageEmbed {
+func buildDeadlockCurrentGameEmbedFromSummary(summary deadlockapi.PlayerSummary) discord.Embed {
 	if summary.CurrentGameError != "" {
-		return &discordgo.MessageEmbed{
+		return discord.Embed{
 			Title:       "🎮 Deadlock Current Game • " + summary.Name,
 			Description: deadlockSummaryDescription(summary, ""),
 			Color:       deadlockEmbedColor(summary),
-			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Status", Value: "Unavailable: " + summary.CurrentGameError, Inline: false},
+			Fields: []discord.EmbedField{
+				{Name: "Status", Value: "Unavailable: " + summary.CurrentGameError},
 			},
 		}
 	}
 
 	if summary.CurrentGame == nil {
-		return &discordgo.MessageEmbed{
+		return discord.Embed{
 			Title:       "🎮 Deadlock Current Game • " + summary.Name,
 			Description: deadlockSummaryDescription(summary, ""),
 			Color:       deadlockEmbedColor(summary),
-			Fields:      []*discordgo.MessageEmbedField{{Name: "Status", Value: "Current game was not requested.", Inline: false}},
+			Fields:      []discord.EmbedField{{Name: "Status", Value: "Current game was not requested."}},
 		}
 	}
 
 	return buildDeadlockCurrentGameEmbed(*summary.CurrentGame)
 }
 
-func buildDeadlockCurrentGameEmbed(status deadlockapi.CurrentGameStatus) *discordgo.MessageEmbed {
-	fields := []*discordgo.MessageEmbedField{}
+func buildDeadlockCurrentGameEmbed(status deadlockapi.CurrentGameStatus) discord.Embed {
+	fields := []discord.EmbedField{}
 	color := deadlockColorNeutral
 
 	if !status.InGame || status.Match == nil || status.Player == nil {
-		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   "Status",
-			Value:  "⚫ No active match found for this player in the Deadlock API watch data.",
-			Inline: false,
+		fields = append(fields, discord.EmbedField{
+			Name:  "Status",
+			Value: "⚫ No active match found for this player in the Deadlock API watch data.",
 		})
 	} else {
 		color = deadlockColorGreen
@@ -494,56 +451,56 @@ func buildDeadlockCurrentGameEmbed(status deadlockapi.CurrentGameStatus) *discor
 		hero := formatCurrentHero(player)
 
 		fields = append(fields,
-			&discordgo.MessageEmbedField{Name: "🟢 Status", Value: "**Currently in game**", Inline: true},
-			&discordgo.MessageEmbedField{Name: "👤 Player", Value: formatActivePlayerName(player), Inline: true},
-			&discordgo.MessageEmbedField{Name: "#️⃣ Match ID", Value: formatOptionalInt64(match.MatchID), Inline: true},
-			&discordgo.MessageEmbedField{Name: "🎭 Hero", Value: hero, Inline: true},
-			&discordgo.MessageEmbedField{Name: "🛡️ Team", Value: formatTeam(player), Inline: true},
-			&discordgo.MessageEmbedField{Name: "⏱️ Duration", Value: formatDuration(match.DurationS), Inline: true},
-			&discordgo.MessageEmbedField{Name: "💰 Team Souls", Value: formatTeamSouls(match, player), Inline: true},
-			&discordgo.MessageEmbedField{Name: "🎮 Mode", Value: formatParsedOrUnknown(match.MatchModeParsed), Inline: true},
-			&discordgo.MessageEmbedField{Name: "🌍 Region", Value: formatParsedOrUnknown(match.RegionModeParsed), Inline: true},
-			&discordgo.MessageEmbedField{Name: "👀 Spectators", Value: formatOptionalInt32(match.Spectators), Inline: true},
+			discord.EmbedField{Name: "🟢 Status", Value: "**Currently in game**", Inline: inline},
+			discord.EmbedField{Name: "👤 Player", Value: formatActivePlayerName(player), Inline: inline},
+			discord.EmbedField{Name: "#️⃣ Match ID", Value: formatOptionalInt64(match.MatchID), Inline: inline},
+			discord.EmbedField{Name: "🎭 Hero", Value: hero, Inline: inline},
+			discord.EmbedField{Name: "🛡️ Team", Value: formatTeam(player), Inline: inline},
+			discord.EmbedField{Name: "⏱️ Duration", Value: formatDuration(match.DurationS), Inline: inline},
+			discord.EmbedField{Name: "💰 Team Souls", Value: formatTeamSouls(match, player), Inline: inline},
+			discord.EmbedField{Name: "🎮 Mode", Value: formatParsedOrUnknown(match.MatchModeParsed), Inline: inline},
+			discord.EmbedField{Name: "🌍 Region", Value: formatParsedOrUnknown(match.RegionModeParsed), Inline: inline},
+			discord.EmbedField{Name: "👀 Spectators", Value: formatOptionalInt32(match.Spectators), Inline: inline},
 		)
 
 		roster := formatActiveRoster(match)
 		if roster != "" {
-			fields = append(fields, &discordgo.MessageEmbedField{Name: "Players In Match", Value: roster, Inline: false})
+			fields = append(fields, discord.EmbedField{Name: "Players In Match", Value: roster})
 		}
 	}
 
-	embed := &discordgo.MessageEmbed{
+	embed := discord.Embed{
 		Title:       "🎮 Deadlock Current Game • " + status.Name,
 		Description: fmt.Sprintf("Steam account ID: `%d`", status.AccountID),
 		URL:         status.ProfileURL,
 		Color:       color,
 		Fields:      fields,
-		Footer:      &discordgo.MessageEmbedFooter{Text: "Use Refresh to re-check active match status."},
+		Footer:      &discord.EmbedFooter{Text: "Use Refresh to re-check active match status."},
 	}
 
 	if status.Player != nil && status.Player.HeroIconURL != "" {
-		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: status.Player.HeroIconURL}
+		embed.Thumbnail = &discord.EmbedResource{URL: status.Player.HeroIconURL}
 	} else if status.Avatar != "" {
-		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: status.Avatar}
+		embed.Thumbnail = &discord.EmbedResource{URL: status.Avatar}
 	}
 
 	return embed
 }
 
-func buildDeadlockBuildsEmbed(summary deadlockapi.PlayerSummary) *discordgo.MessageEmbed {
-	fields := []*discordgo.MessageEmbedField{}
+func buildDeadlockBuildsEmbed(summary deadlockapi.PlayerSummary) discord.Embed {
+	fields := []discord.EmbedField{}
 
 	if summary.BuildError != "" {
-		fields = append(fields, &discordgo.MessageEmbedField{Name: "🧰 Builds & Items", Value: "Unavailable: " + summary.BuildError, Inline: false})
+		fields = append(fields, discord.EmbedField{Name: "🧰 Builds & Items", Value: "Unavailable: " + summary.BuildError})
 	} else if summary.Build == nil {
-		fields = append(fields, &discordgo.MessageEmbedField{Name: "🧰 Builds & Items", Value: "Build stats were not requested.", Inline: false})
+		fields = append(fields, discord.EmbedField{Name: "🧰 Builds & Items", Value: "Build stats were not requested."})
 	} else {
-		fields = append(fields, &discordgo.MessageEmbedField{
+		fields = append(fields, discord.EmbedField{
 			Name:   "🎭 Hero",
 			Value:  fmt.Sprintf("**%s**\nHero ID `%d`", summary.Build.HeroName, summary.Build.HeroID),
-			Inline: true,
+			Inline: inline,
 		})
-		fields = append(fields, &discordgo.MessageEmbedField{Name: "📚 Source", Value: summary.Build.BuildsSourceNote, Inline: true})
+		fields = append(fields, discord.EmbedField{Name: "📚 Source", Value: summary.Build.BuildsSourceNote, Inline: inline})
 
 		buildLines := []string{}
 		for index, build := range summary.Build.Builds {
@@ -556,44 +513,44 @@ func buildDeadlockBuildsEmbed(summary deadlockapi.PlayerSummary) *discordgo.Mess
 				formatInt(int(build.Players)),
 			))
 		}
-		fields = append(fields, &discordgo.MessageEmbedField{Name: "🏗️ Top Builds", Value: emptyFallback(strings.Join(buildLines, "\n"), "No build rows returned."), Inline: false})
+		fields = append(fields, discord.EmbedField{Name: "🏗️ Top Builds", Value: emptyFallback(strings.Join(buildLines, "\n"), "No build rows returned.")})
 
 		itemLines := []string{}
 		for index, item := range summary.Build.PopularItems {
 			itemLines = append(itemLines, fmt.Sprintf("`#%d` **%s** • %s builds", index+1, item.Name, formatInt(int(item.Builds))))
 		}
-		fields = append(fields, &discordgo.MessageEmbedField{Name: "🔥 Popular Items", Value: emptyFallback(strings.Join(itemLines, "\n"), "No item rows returned."), Inline: false})
+		fields = append(fields, discord.EmbedField{Name: "🔥 Popular Items", Value: emptyFallback(strings.Join(itemLines, "\n"), "No item rows returned.")})
 	}
 
-	embed := &discordgo.MessageEmbed{
+	embed := discord.Embed{
 		Title:       "🧰 Builds & Items • " + summary.Name,
 		Description: deadlockSummaryDescription(summary, "Build IDs come from Deadlock API hero build analytics."),
 		URL:         summary.ProfileURL,
 		Color:       deadlockEmbedColor(summary),
 		Fields:      fields,
-		Footer:      &discordgo.MessageEmbedFooter{Text: "Build IDs come from Deadlock API hero build analytics."},
+		Footer:      &discord.EmbedFooter{Text: "Build IDs come from Deadlock API hero build analytics."},
 	}
 
 	if summary.Build != nil && summary.Build.HeroIconURL != "" {
-		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: summary.Build.HeroIconURL}
+		embed.Thumbnail = &discord.EmbedResource{URL: summary.Build.HeroIconURL}
 	} else if summary.TopHeroIconURL != "" {
-		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: summary.TopHeroIconURL}
+		embed.Thumbnail = &discord.EmbedResource{URL: summary.TopHeroIconURL}
 	} else if summary.Avatar != "" {
-		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: summary.Avatar}
+		embed.Thumbnail = &discord.EmbedResource{URL: summary.Avatar}
 	}
 
 	return embed
 }
 
-func buildDeadlockErrorEmbed(profile deadlockapi.SteamProfile, err error) *discordgo.MessageEmbed {
-	return &discordgo.MessageEmbed{
+func buildDeadlockErrorEmbed(profile deadlockapi.SteamProfile, err error) discord.Embed {
+	return discord.Embed{
 		Title:       "⚠️ Deadlock Statistics Error",
 		Description: fmt.Sprintf("Could not refresh stats for `%s`: %v", profile.DisplayName(), err),
 		Color:       deadlockColorRed,
 	}
 }
 
-func rankFieldFromSummary(summary deadlockapi.PlayerSummary) *discordgo.MessageEmbedField {
+func rankFieldFromSummary(summary deadlockapi.PlayerSummary) discord.EmbedField {
 	value := "Rank was not requested."
 	if summary.Rank != nil {
 		value = fmt.Sprintf(
@@ -607,10 +564,10 @@ func rankFieldFromSummary(summary deadlockapi.PlayerSummary) *discordgo.MessageE
 		value = "Unavailable: " + summary.RankError
 	}
 
-	return &discordgo.MessageEmbedField{Name: "🏅 Rank Prediction", Value: value, Inline: false}
+	return discord.EmbedField{Name: "🏅 Rank Prediction", Value: value}
 }
 
-func currentGameFieldFromSummary(summary deadlockapi.PlayerSummary) *discordgo.MessageEmbedField {
+func currentGameFieldFromSummary(summary deadlockapi.PlayerSummary) discord.EmbedField {
 	value := "Current game was not requested."
 	if summary.CurrentGame != nil {
 		if summary.CurrentGame.InGame {
@@ -631,17 +588,17 @@ func currentGameFieldFromSummary(summary deadlockapi.PlayerSummary) *discordgo.M
 		value = "Unavailable: " + summary.CurrentGameError
 	}
 
-	return &discordgo.MessageEmbedField{Name: "🎮 Current Game", Value: value, Inline: false}
+	return discord.EmbedField{Name: "🎮 Current Game", Value: value}
 }
 
-func buildFieldFromSummary(summary deadlockapi.PlayerSummary) *discordgo.MessageEmbedField {
+func buildFieldFromSummary(summary deadlockapi.PlayerSummary) discord.EmbedField {
 	value := "Build stats were not requested."
 	if summary.Build != nil {
 		value = fmt.Sprintf("**%s** • %d build rows • %d popular items\n%s", summary.Build.HeroName, len(summary.Build.Builds), len(summary.Build.PopularItems), summary.Build.BuildsSourceNote)
 	} else if summary.BuildError != "" {
 		value = "Unavailable: " + summary.BuildError
 	}
-	return &discordgo.MessageEmbedField{Name: "🧰 Builds & Items", Value: value, Inline: false}
+	return discord.EmbedField{Name: "🧰 Builds & Items", Value: value}
 }
 
 func formatRecentDeadlockMatches(matches []deadlockapi.RecentMatch) string {
@@ -755,27 +712,27 @@ func formatCurrentHero(player *deadlockapi.ActiveMatchPlayer) string {
 	return formatOptionalInt32(player.HeroID)
 }
 
-func buildDeadlockComponents(state deadlockComponentState, recentCount int) []discordgo.MessageComponent {
-	return []discordgo.MessageComponent{
-		discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-			deadlockButton("📊 Overview", deadlockViewOverview, state, discordgo.SecondaryButton, 0),
-			deadlockButton("🏅 Rank", deadlockViewRank, state, discordgo.SecondaryButton, 0),
-			deadlockButton("🕘 Recent", deadlockViewRecent, state, discordgo.SecondaryButton, state.Page),
-			deadlockButton("🎮 Current", deadlockViewCurrent, state, discordgo.SecondaryButton, 0),
-			deadlockButton("🧰 Builds", deadlockViewBuilds, state, discordgo.SecondaryButton, 0),
-		}},
-		discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-			deadlockButton("✨ All", deadlockViewAll, state, discordgo.SecondaryButton, 0),
+func buildDeadlockComponents(state deadlockComponentState, recentCount int) []discord.LayoutComponent {
+	return []discord.LayoutComponent{
+		discord.NewActionRow(
+			deadlockButton("📊 Overview", deadlockViewOverview, state, discord.ButtonStyleSecondary, 0),
+			deadlockButton("🏅 Rank", deadlockViewRank, state, discord.ButtonStyleSecondary, 0),
+			deadlockButton("🕘 Recent", deadlockViewRecent, state, discord.ButtonStyleSecondary, state.Page),
+			deadlockButton("🎮 Current", deadlockViewCurrent, state, discord.ButtonStyleSecondary, 0),
+			deadlockButton("🧰 Builds", deadlockViewBuilds, state, discord.ButtonStyleSecondary, 0),
+		),
+		discord.NewActionRow(
+			deadlockButton("✨ All", deadlockViewAll, state, discord.ButtonStyleSecondary, 0),
 			deadlockPageButton("◀ Recent", state, -1, recentCount),
 			deadlockPageButton("Recent ▶", state, 1, recentCount),
-			deadlockButton("🔄 Refresh", state.View, state, discordgo.PrimaryButton, state.Page),
-		}},
+			deadlockButton("🔄 Refresh", state.View, state, discord.ButtonStylePrimary, state.Page),
+		),
 	}
 }
 
-func deadlockButton(label string, view string, state deadlockComponentState, style discordgo.ButtonStyle, page int) discordgo.Button {
+func deadlockButton(label string, view string, state deadlockComponentState, style discord.ButtonStyle, page int) discord.ButtonComponent {
 	if state.View == view {
-		style = discordgo.PrimaryButton
+		style = discord.ButtonStylePrimary
 	}
 	state.View = view
 	state.Page = page
@@ -784,10 +741,10 @@ func deadlockButton(label string, view string, state deadlockComponentState, sty
 		action = "refresh"
 	}
 
-	return discordgo.Button{Label: label, Style: style, CustomID: deadlockCustomIDWithAction(state, action)}
+	return discord.ButtonComponent{Label: label, Style: style, CustomID: deadlockCustomIDWithAction(state, action)}
 }
 
-func deadlockPageButton(label string, state deadlockComponentState, delta int, recentCount int) discordgo.Button {
+func deadlockPageButton(label string, state deadlockComponentState, delta int, recentCount int) discord.ButtonComponent {
 	state.View = deadlockViewRecent
 	state.Page += delta
 	state.Page = clampRecentPage(state.Page, recentCount)
@@ -809,7 +766,7 @@ func deadlockPageButton(label string, state deadlockComponentState, delta int, r
 		action = "page_prev"
 	}
 
-	return discordgo.Button{Label: label, Style: discordgo.SecondaryButton, CustomID: deadlockCustomIDWithAction(state, action), Disabled: disabled}
+	return discord.ButtonComponent{Label: label, Style: discord.ButtonStyleSecondary, CustomID: deadlockCustomIDWithAction(state, action), Disabled: disabled}
 }
 
 func deadlockCustomIDWithAction(state deadlockComponentState, action string) string {
@@ -879,19 +836,6 @@ func cleanDeadlockView(view string) string {
 	default:
 		return deadlockViewOverview
 	}
-}
-
-func interactionUserID(i *discordgo.InteractionCreate) string {
-	if i == nil || i.Interaction == nil {
-		return ""
-	}
-	if i.Member != nil && i.Member.User != nil {
-		return i.Member.User.ID
-	}
-	if i.User != nil {
-		return i.User.ID
-	}
-	return ""
 }
 
 func deadlockSummaryDescription(summary deadlockapi.PlayerSummary, note string) string {

@@ -2,12 +2,14 @@ package commands
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"discord_gobot/internal/discordutil"
 	"discord_gobot/internal/weather"
 
-	"github.com/bwmarrin/discordgo"
+	"github.com/disgoorg/disgo/discord"
+	"github.com/disgoorg/disgo/events"
 )
 
 // Weather implements the /weather command.
@@ -20,132 +22,83 @@ import (
 //	/weather location:Dublin view:full private:true
 type Weather struct{}
 
-func (Weather) Definition() *discordgo.ApplicationCommand {
-	return &discordgo.ApplicationCommand{
+func (Weather) Definition() discord.SlashCommandCreate {
+	return discord.SlashCommandCreate{
 		Name:        "weather",
 		Description: "Get weather from wttr.in",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Type:        discordgo.ApplicationCommandOptionString,
+		Options: []discord.ApplicationCommandOption{
+			discord.ApplicationCommandOptionString{
 				Name:        "location",
 				Description: "City, town, airport code, or place name",
 				Required:    true,
 			},
-			{
-				Type:        discordgo.ApplicationCommandOptionString,
+			discord.ApplicationCommandOptionString{
 				Name:        "view",
 				Description: "How much weather information to show",
-				Required:    false,
-				Choices: []*discordgo.ApplicationCommandOptionChoice{
-					{
-						Name:  "Compact one-line",
-						Value: "compact",
-					},
-					{
-						Name:  "Current weather only",
-						Value: "current",
-					},
-					{
-						Name:  "Today forecast",
-						Value: "today",
-					},
-					{
-						Name:  "Today and tomorrow",
-						Value: "two_days",
-					},
-					{
-						Name:  "Full wttr.in forecast",
-						Value: "full",
-					},
+				Choices: []discord.ApplicationCommandOptionChoiceString{
+					{Name: "Compact one-line", Value: "compact"},
+					{Name: "Current weather only", Value: "current"},
+					{Name: "Today forecast", Value: "today"},
+					{Name: "Today and tomorrow", Value: "two_days"},
+					{Name: "Full wttr.in forecast", Value: "full"},
 				},
 			},
-			{
-				Type:        discordgo.ApplicationCommandOptionString,
+			discord.ApplicationCommandOptionString{
 				Name:        "units",
 				Description: "Weather units",
-				Required:    false,
-				Choices: []*discordgo.ApplicationCommandOptionChoice{
-					{
-						Name:  "Metric: °C and km/h",
-						Value: "m",
-					},
-					{
-						Name:  "US: °F and mph",
-						Value: "u",
-					},
-					{
-						Name:  "Metric: °C and m/s wind",
-						Value: "M",
-					},
+				Choices: []discord.ApplicationCommandOptionChoiceString{
+					{Name: "Metric: °C and km/h", Value: "m"},
+					{Name: "US: °F and mph", Value: "u"},
+					{Name: "Metric: °C and m/s wind", Value: "M"},
 				},
 			},
-			{
-				Type:        discordgo.ApplicationCommandOptionBoolean,
+			discord.ApplicationCommandOptionBool{
 				Name:        "private",
 				Description: "Only show the weather result to you",
-				Required:    false,
 			},
 		},
 	}
 }
 
-func (Weather) Handle(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	options := discordutil.OptionMap(i.ApplicationCommandData().Options)
+func (Weather) Handle(e *events.ApplicationCommandInteractionCreate) {
+	data := e.SlashCommandInteractionData()
 
-	locationOption, ok := options["location"]
-	if !ok {
-		discordutil.Respond(s, i, "Missing required input: location", true)
-		return
-	}
-
-	location := strings.TrimSpace(locationOption.StringValue())
+	location := strings.TrimSpace(data.String("location"))
 	if location == "" {
-		discordutil.Respond(s, i, "Location cannot be empty.", true)
+		discordutil.Reply(e, "Location cannot be empty.", true)
 		return
 	}
 
-	view := "today"
-	if viewOption, ok := options["view"]; ok {
-		view = viewOption.StringValue()
+	view, ok := data.OptString("view")
+	if !ok {
+		view = "today"
 	}
-
-	units := "m"
-	if unitsOption, ok := options["units"]; ok {
-		units = unitsOption.StringValue()
+	units, ok := data.OptString("units")
+	if !ok {
+		units = "m"
 	}
+	private := data.Bool("private")
 
-	private := false
-	if privateOption, ok := options["private"]; ok {
-		private = privateOption.BoolValue()
+	if err := e.DeferCreateMessage(private); err != nil {
+		log.Printf("error deferring /weather: %v", err)
+		return
 	}
-
-	discordutil.Defer(s, i, private)
 
 	result, err := weather.FetchWttr(location, units, view)
 	if err != nil {
-		discordutil.EditOriginal(
-			s,
-			i,
-			fmt.Sprintf("Could not get weather for `%s`: %v", location, err),
-		)
+		discordutil.EditText(e, fmt.Sprintf("Could not get weather for `%s`: %v", location, err))
 		return
 	}
 
-	sendWeatherOutput(s, i, result, private)
-}
-
-func sendWeatherOutput(s *discordgo.Session, i *discordgo.InteractionCreate, output string, private bool) {
-	chunks := splitForDiscordCodeBlocks(output)
-
+	chunks := splitForDiscordCodeBlocks(result)
 	if len(chunks) == 0 {
-		discordutil.EditOriginal(s, i, "wttr.in returned no weather output.")
+		discordutil.EditText(e, "wttr.in returned no weather output.")
 		return
 	}
 
-	discordutil.EditOriginal(s, i, codeBlock(chunks[0]))
-
+	discordutil.EditText(e, codeBlock(chunks[0]))
 	for _, chunk := range chunks[1:] {
-		discordutil.FollowUp(s, i, codeBlock(chunk), private)
+		discordutil.FollowUp(e, codeBlock(chunk), private)
 	}
 }
 

@@ -9,32 +9,21 @@ import (
 )
 
 func main() {
-	// Load configuration from environment variables
-	//
-	// Required:
-	//   DISCORD_TOKEN
-	//
-	// Optional:
-	//   GUILD_ID
-	//   APP_ID
+	// Load configuration from environment variables (see config.Load)
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Create the bot
-	//
 	// commands.All() returns every slash command we want to register
 	// This keeps main.go small and prevents the main file from knowing
 	// the details of every command
-	b, err := bot.New(cfg, commands.All())
+	b, err := bot.New(cfg, commands.All(cfg))
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Start the bot
-	//
-	// Run() opens the Discord websocket connection, registers slash commands,
+	// Run() connects to Discord, registers slash commands,
 	// and keeps the process alive until CTRL+C
 	if err := b.Run(); err != nil {
 		log.Fatal(err)

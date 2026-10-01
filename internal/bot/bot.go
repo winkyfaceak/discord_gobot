@@ -8,22 +8,25 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"discord_gobot/internal/commands"
 	"discord_gobot/internal/config"
 
-	"github.com/bwmarrin/discordgo"
+	"github.com/disgoorg/disgo"
+	disgobot "github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/cache"
+	"github.com/disgoorg/disgo/discord"
+	"github.com/disgoorg/disgo/events"
+	"github.com/disgoorg/disgo/gateway"
+	"github.com/disgoorg/disgo/rest"
+	"github.com/disgoorg/disgo/voice"
+	"github.com/disgoorg/godave/golibdave"
 )
 
-// Bot owns the Discord session and the registered command list
-//
-// The session is the main DiscordGo object
-// Most Discord API actions happen through *discordgo.Session
+// Bot owns the command list and routes Discord interactions to them
 type Bot struct {
-	// session is the active DiscordGo connection/client
-	session *discordgo.Session
-
-	// cfg stores token, guild ID, and app ID
+	// cfg stores the token and optional guild ID
 	cfg config.Config
 
 	// commands stores every command implementation.
@@ -38,21 +41,8 @@ type Bot struct {
 }
 
 // New creates a Bot but does not connect to Discord yet
-//
-// This function wires together:
-//   - the DiscordGo session
-//   - event handlers
-//   - slash command lookup
 func New(cfg config.Config, cmds []commands.Command) (*Bot, error) {
-	// DiscordGo expects the authorization format to include "Bot ".
-	// We keep DISCORD_TOKEN as the raw token and add the prefix here.
-	session, err := discordgo.New("Bot " + cfg.Token)
-	if err != nil {
-		return nil, fmt.Errorf("create Discord session: %w", err)
-	}
-
 	b := &Bot{
-		session:           session,
 		cfg:               cfg,
 		commands:          cmds,
 		commandByName:     make(map[string]commands.Command),
@@ -61,32 +51,24 @@ func New(cfg config.Config, cmds []commands.Command) (*Bot, error) {
 
 	// Build a lookup table:
 	//
-	//   "ping"  -> Ping{}
-	//   "hello" -> Hello{}
-	//   "echo"  -> Echo{}
+	//   "ping"    -> Ping{}
+	//   "weather" -> Weather{}
 	//
 	// This makes interaction handling simple later
 	for _, cmd := range cmds {
-		def := cmd.Definition()
-
-		if def == nil {
-			return nil, fmt.Errorf("command returned nil definition")
-		}
-
-		if def.Name == "" {
+		name := cmd.Definition().Name
+		if name == "" {
 			return nil, fmt.Errorf("command has empty name")
 		}
-
-		if _, exists := b.commandByName[def.Name]; exists {
-			return nil, fmt.Errorf("duplicate command name: %s", def.Name)
+		if _, exists := b.commandByName[name]; exists {
+			return nil, fmt.Errorf("duplicate command name: %s", name)
 		}
-
-		b.commandByName[def.Name] = cmd
+		b.commandByName[name] = cmd
 
 		if componentCommand, ok := cmd.(commands.ComponentCommand); ok {
 			prefix := strings.TrimSpace(componentCommand.ComponentPrefix())
 			if prefix == "" {
-				return nil, fmt.Errorf("component command /%s has empty component prefix", def.Name)
+				return nil, fmt.Errorf("component command /%s has empty component prefix", name)
 			}
 			if _, exists := b.componentByPrefix[prefix]; exists {
 				return nil, fmt.Errorf("duplicate component prefix: %s", prefix)
@@ -95,59 +77,58 @@ func New(cfg config.Config, cmds []commands.Command) (*Bot, error) {
 		}
 	}
 
-	// Register event handlers
-	//
-	// DiscordGo calls these functions when matching events arrive
-	session.AddHandler(b.onReady)
-	session.AddHandler(b.onInteractionCreate)
-
-	// Slash commands do not require MessageContent intent
-	//
-	// MessageContent is only needed when reading normal chat messages
-	// Since this bot uses slash commands, Guilds intent is enough here
-	session.Identify.Intents = discordgo.IntentsGuilds
-
 	return b, nil
 }
 
-// Run starts the bot and keeps it alive until the process is interrupted
+// Run connects to Discord and keeps the bot alive until the process is interrupted
 func (b *Bot) Run() error {
-	// Open starts the websocket connection to Discord
-	//
-	// After this succeeds, the bot can receive events
-	if err := b.session.Open(); err != nil {
-		return fmt.Errorf("open Discord session: %w", err)
+	opts := []disgobot.ConfigOpt{
+		// Guilds for the server list, voice states to find the caller's voice channel
+		disgobot.WithGatewayConfigOpts(gateway.WithIntents(gateway.IntentGuilds, gateway.IntentGuildVoiceStates)),
+		disgobot.WithCacheConfigOpts(cache.WithCaches(cache.FlagGuilds, cache.FlagVoiceStates)),
+		// Handlers do slow API work, so don't block the gateway on them
+		disgobot.WithEventManagerConfigOpts(disgobot.WithAsyncEventsEnabled()),
+		// Text the bot echoes back (e.g. a /weather location of @everyone) never pings anyone
+		disgobot.WithRestConfigOpts(rest.WithDefaultAllowedMentions(discord.AllowedMentions{Parse: []discord.AllowedMentionType{}})),
+		// Discord requires DAVE end-to-end encryption for voice
+		disgobot.WithVoiceManagerConfigOpts(voice.WithDaveSessionCreateFunc(golibdave.NewSession)),
+		disgobot.WithEventListenerFunc(onReady),
+		disgobot.WithEventListenerFunc(b.onCommand),
+		disgobot.WithEventListenerFunc(b.onComponent),
+		disgobot.WithEventListenerFunc(b.onAutocomplete),
+	}
+	for _, cmd := range b.commands {
+		if listener, ok := cmd.(disgobot.EventListener); ok {
+			opts = append(opts, disgobot.WithEventListeners(listener))
+		}
 	}
 
-	// Always close the session when Run exits
-	defer b.session.Close()
-
-	// Get the Discord application ID
-	//
-	// Slash commands are registered against an application ID
-	appID, err := b.resolveAppID()
+	client, err := disgo.New(b.cfg.Token, opts...)
 	if err != nil {
+		return fmt.Errorf("create Discord client: %w", err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		client.Close(ctx)
+	}()
+
+	if err := b.registerCommands(client); err != nil {
 		return err
 	}
 
-	// Register slash commands with Discord
-	if err := b.registerCommands(appID); err != nil {
-		return err
-	}
-
-	if b.cfg.GuildID == "" {
-		log.Println("Slash commands registered globally.")
-		log.Println("Global commands can take longer to appear.")
-	} else {
-		log.Printf("Slash commands registered for guild/server ID: %s", b.cfg.GuildID)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := client.OpenGateway(ctx); err != nil {
+		return fmt.Errorf("open Discord gateway: %w", err)
 	}
 
 	log.Println("Bot is running. Press CTRL+C to stop.")
 
-	// Wait for CTRL+C or a termination signal (docker stop sends SIGTERM)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// Wait for CTRL+C or a termination signal (systemctl stop sends SIGTERM)
+	stopCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	<-ctx.Done()
+	<-stopCtx.Done()
 
 	for _, cmd := range b.commands {
 		if shutdownCommand, ok := cmd.(commands.ShutdownCommand); ok {
@@ -159,31 +140,6 @@ func (b *Bot) Run() error {
 	return nil
 }
 
-// resolveAppID returns the application/client ID used to register commands
-//
-// You can provide APP_ID manually, or let the bot try to discover it
-func (b *Bot) resolveAppID() (string, error) {
-	// Prefer explicit APP_ID from the environment
-	if b.cfg.AppID != "" {
-		return b.cfg.AppID, nil
-	}
-
-	// After the session opens, DiscordGo usually has the bot user in state
-	if b.session.State != nil &&
-		b.session.State.User != nil &&
-		b.session.State.User.ID != "" {
-		return b.session.State.User.ID, nil
-	}
-
-	// Fallback: ask Discord who the bot is
-	user, err := b.session.User("@me")
-	if err != nil {
-		return "", fmt.Errorf("get bot user/application ID: %w", err)
-	}
-
-	return user.ID, nil
-}
-
 // registerCommands replaces the app's command list with ours in one call.
 //
 // Bulk overwrite is idempotent, so restarts don't burn Discord's daily
@@ -191,48 +147,42 @@ func (b *Bot) resolveAppID() (string, error) {
 //
 // If GUILD_ID is set, commands are registered to that one server
 // If GUILD_ID is empty, commands are registered globally
-func (b *Bot) registerCommands(appID string) error {
-	defs := make([]*discordgo.ApplicationCommand, 0, len(b.commands))
+func (b *Bot) registerCommands(client *disgobot.Client) error {
+	defs := make([]discord.ApplicationCommandCreate, 0, len(b.commands))
 	for _, cmd := range b.commands {
 		defs = append(defs, cmd.Definition())
 	}
 
-	created, err := b.session.ApplicationCommandBulkOverwrite(appID, b.cfg.GuildID, defs)
+	var created []discord.ApplicationCommand
+	var err error
+	if b.cfg.GuildID == 0 {
+		created, err = client.Rest.SetGlobalCommands(client.ApplicationID, defs)
+	} else {
+		created, err = client.Rest.SetGuildCommands(client.ApplicationID, b.cfg.GuildID, defs)
+	}
 	if err != nil {
 		return fmt.Errorf("register slash commands: %w", err)
 	}
 
 	for _, cmd := range created {
-		log.Printf("Registered command: /%s", cmd.Name)
+		log.Printf("Registered command: /%s", cmd.Name())
+	}
+	if b.cfg.GuildID == 0 {
+		log.Println("Slash commands registered globally.")
+	} else {
+		log.Printf("Slash commands registered for guild/server ID: %s", b.cfg.GuildID)
 	}
 
 	return nil
 }
 
 // onReady runs when Discord confirms the bot is connected
-func (b *Bot) onReady(s *discordgo.Session, r *discordgo.Ready) {
-	if s.State == nil || s.State.User == nil {
-		log.Println("Bot connected, but user state is not available")
-		return
-	}
-
-	log.Printf("Logged in as %s", s.State.User.Username)
+func onReady(e *events.Ready) {
+	log.Printf("Logged in as %s (application ID %s)", e.User.Username, e.User.ID)
 }
 
-// onInteractionCreate runs when a Discord interaction is created.
-//
-// Slash commands, buttons, select menus, and modals are all interactions.
-func (b *Bot) onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	switch i.Type {
-	case discordgo.InteractionApplicationCommand:
-		b.handleApplicationCommand(s, i)
-	case discordgo.InteractionMessageComponent:
-		b.handleMessageComponent(s, i)
-	}
-}
-
-func (b *Bot) handleApplicationCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	name := i.ApplicationCommandData().Name
+func (b *Bot) onCommand(e *events.ApplicationCommandInteractionCreate) {
+	name := e.Data.CommandName()
 
 	cmd, ok := b.commandByName[name]
 	if !ok {
@@ -240,15 +190,11 @@ func (b *Bot) handleApplicationCommand(s *discordgo.Session, i *discordgo.Intera
 		return
 	}
 
-	cmd.Handle(s, i)
+	cmd.Handle(e)
 }
 
-func (b *Bot) handleMessageComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	customID := i.MessageComponentData().CustomID
-	prefix := customID
-	if separator := strings.Index(customID, ":"); separator >= 0 {
-		prefix = customID[:separator]
-	}
+func (b *Bot) onComponent(e *events.ComponentInteractionCreate) {
+	prefix, _, _ := strings.Cut(e.Data.CustomID(), ":")
 
 	handler, ok := b.componentByPrefix[prefix]
 	if !ok {
@@ -256,5 +202,11 @@ func (b *Bot) handleMessageComponent(s *discordgo.Session, i *discordgo.Interact
 		return
 	}
 
-	handler.HandleComponent(s, i)
+	handler.HandleComponent(e)
+}
+
+func (b *Bot) onAutocomplete(e *events.AutocompleteInteractionCreate) {
+	if cmd, ok := b.commandByName[e.Data.CommandName].(commands.AutocompleteCommand); ok {
+		cmd.HandleAutocomplete(e)
+	}
 }

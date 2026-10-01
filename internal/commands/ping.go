@@ -3,7 +3,8 @@ package commands
 import (
 	"discord_gobot/internal/discordutil"
 
-	"github.com/bwmarrin/discordgo"
+	"github.com/disgoorg/disgo/discord"
+	"github.com/disgoorg/disgo/events"
 )
 
 // Ping implements the /ping command
@@ -12,18 +13,14 @@ import (
 type Ping struct{}
 
 // Definition tells Discord how the /ping command should appear
-//
-// This command has no options, so the user simply runs:
-//
-//	/ping
-func (Ping) Definition() *discordgo.ApplicationCommand {
-	return &discordgo.ApplicationCommand{
+func (Ping) Definition() discord.SlashCommandCreate {
+	return discord.SlashCommandCreate{
 		Name:        "ping",
 		Description: "Check whether the bot is alive",
 	}
 }
 
 // Handle runs when the user executes /ping
-func (Ping) Handle(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	discordutil.Respond(s, i, "Pong!", false)
+func (Ping) Handle(e *events.ApplicationCommandInteractionCreate) {
+	discordutil.Reply(e, "Pong!", false)
 }

@@ -4,68 +4,44 @@ import (
 	"bytes"
 	"log"
 
-	"github.com/bwmarrin/discordgo"
+	"github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/discord"
+	"github.com/disgoorg/disgo/rest"
+	"github.com/disgoorg/snowflake/v2"
 )
 
-// noMentions stops user-supplied text (e.g. /echo @everyone) from pinging anyone.
-var noMentions = &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}}
+// Replier is any interaction event that can answer with a new message
+// (slash commands and button clicks).
+type Replier interface {
+	CreateMessage(discord.MessageCreate, ...rest.RequestOpt) error
+}
 
-// Respond sends an immediate response to a slash command interaction.
-//
-// Use this for fast commands like /ping.
-func Respond(s *discordgo.Session, i *discordgo.InteractionCreate, message string, private bool) {
-	flags := discordgo.MessageFlags(0)
+// Interaction is any interaction event whose original response can be edited.
+type Interaction interface {
+	Client() *bot.Client
+	ApplicationID() snowflake.ID
+	Token() string
+}
 
+// Reply sends text as the immediate interaction response.
+func Reply(e Replier, text string, private bool) {
+	msg := discord.MessageCreate{Content: text}
 	if private {
-		flags = discordgo.MessageFlagsEphemeral
+		msg.Flags = discord.MessageFlagEphemeral
 	}
-
-	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Content:         message,
-			Flags:           flags,
-			AllowedMentions: noMentions,
-		},
-	})
-
-	if err != nil {
+	if err := e.CreateMessage(msg); err != nil {
 		log.Printf("error responding to interaction: %v", err)
 	}
 }
 
-// Defer tells Discord:
-//
-//	"I received the command, but I need more time."
-//
-// Use this before slow work such as HTTP APIs or database calls
-func Defer(s *discordgo.Session, i *discordgo.InteractionCreate, private bool) {
-	flags := discordgo.MessageFlags(0)
-
-	if private {
-		flags = discordgo.MessageFlagsEphemeral
-	}
-
-	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Flags: flags,
-		},
-	})
-
-	if err != nil {
-		log.Printf("error deferring interaction: %v", err)
-	}
+// EditOriginal replaces the (usually deferred) interaction response.
+func EditOriginal(e Interaction, update discord.MessageUpdate) (*discord.Message, error) {
+	return e.Client().Rest.UpdateInteractionResponse(e.ApplicationID(), e.Token(), update)
 }
 
-// EditOriginal replaces the deferred response with final content
-func EditOriginal(s *discordgo.Session, i *discordgo.InteractionCreate, message string) {
-	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-		Content:         &message,
-		AllowedMentions: noMentions,
-	})
-
-	if err != nil {
+// EditText replaces the deferred response with text.
+func EditText(e Interaction, text string) {
+	if _, err := EditOriginal(e, discord.MessageUpdate{Content: &text}); err != nil {
 		log.Printf("error editing interaction response: %v", err)
 	}
 }
@@ -73,196 +49,40 @@ func EditOriginal(s *discordgo.Session, i *discordgo.InteractionCreate, message 
 // FollowUp sends an extra message after the original interaction response.
 //
 // This is useful when the content is too long for one Discord message.
-func FollowUp(s *discordgo.Session, i *discordgo.InteractionCreate, message string, private bool) {
-	flags := discordgo.MessageFlags(0)
-
+func FollowUp(e Interaction, text string, private bool) {
+	msg := discord.MessageCreate{Content: text}
 	if private {
-		flags = discordgo.MessageFlagsEphemeral
+		msg.Flags = discord.MessageFlagEphemeral
 	}
-
-	_, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
-		Content:         message,
-		Flags:           flags,
-		AllowedMentions: noMentions,
-	})
-
-	if err != nil {
+	if _, err := e.Client().Rest.CreateFollowupMessage(e.ApplicationID(), e.Token(), msg); err != nil {
 		log.Printf("error sending follow-up message: %v", err)
 	}
 }
 
-// EditOriginalWithImage edits the original interaction response and attaches
-// a PNG image.
-//
-// The embed can reference the image using:
-//
-//	attachment://filename.png
-func EditOriginalWithImage(
-	s *discordgo.Session,
-	i *discordgo.InteractionCreate,
-	message string,
-	filename string,
-	imageBytes []byte,
-	embed *discordgo.MessageEmbed,
-) {
-	embeds := []*discordgo.MessageEmbed{embed}
-
-	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-		Content: &message,
-		Embeds:  &embeds,
-		Files: []*discordgo.File{
-			{
-				Name:        filename,
-				ContentType: "image/png",
-				Reader:      bytes.NewReader(imageBytes),
-			},
-		},
-	})
-
-	if err != nil {
-		log.Printf("error editing interaction response with image: %v", err)
+// ImageUpdate swaps a message's content for a PNG card shown in the embed,
+// removing any earlier attachment. alt is the image's alt text; Discord only
+// keeps a new file on an edit when it has one.
+func ImageUpdate(filename string, alt string, png []byte, embed discord.Embed, components []discord.LayoutComponent) discord.MessageUpdate {
+	if components == nil {
+		components = []discord.LayoutComponent{} // an empty list removes old buttons
 	}
-}
-
-// EditOriginalEmbed edits the original deferred interaction response using
-// a Discord embed.
-func EditOriginalEmbed(
-	s *discordgo.Session,
-	i *discordgo.InteractionCreate,
-	embed *discordgo.MessageEmbed,
-) {
-	embeds := []*discordgo.MessageEmbed{embed}
-
-	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-		Embeds: &embeds,
-	})
-
-	if err != nil {
-		log.Printf("error editing interaction response with embed: %v", err)
-	}
-}
-
-// EditOriginalEmbedWithComponents edits the original deferred interaction response
-// with an embed and Discord components such as buttons.
-func EditOriginalEmbedWithComponents(
-	s *discordgo.Session,
-	i *discordgo.InteractionCreate,
-	embed *discordgo.MessageEmbed,
-	components []discordgo.MessageComponent,
-) {
-	embeds := []*discordgo.MessageEmbed{embed}
-
-	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-		Embeds:     &embeds,
-		Components: &components,
-	})
-
-	if err != nil {
-		log.Printf("error editing interaction response with embed/components: %v", err)
-	}
-}
-
-// EditOriginalImageWithComponents creates an image-backed interactive response
-// and returns its message identity for later public channel edits.
-func EditOriginalImageWithComponents(
-	s *discordgo.Session,
-	i *discordgo.InteractionCreate,
-	filename string,
-	imageBytes []byte,
-	embed *discordgo.MessageEmbed,
-	components []discordgo.MessageComponent,
-) (*discordgo.Message, error) {
-	embeds := []*discordgo.MessageEmbed{embed}
-	attachments := []*discordgo.MessageAttachment{}
-
-	return s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-		Embeds:      &embeds,
+	embed.Image = &discord.EmbedResource{URL: "attachment://" + filename}
+	return discord.MessageUpdate{
+		Embeds:      &[]discord.Embed{embed},
 		Components:  &components,
-		Attachments: &attachments,
-		Files: []*discordgo.File{
-			{
-				Name:        filename,
-				ContentType: "image/png",
-				Reader:      bytes.NewReader(imageBytes),
-			},
-		},
-	})
-}
-
-// EditChannelImageWithComponents replaces a public interactive card's image
-// and controls after its originating interaction has completed.
-func EditChannelImageWithComponents(
-	s *discordgo.Session,
-	channelID string,
-	messageID string,
-	filename string,
-	imageBytes []byte,
-	embed *discordgo.MessageEmbed,
-	components []discordgo.MessageComponent,
-) (*discordgo.Message, error) {
-	embeds := []*discordgo.MessageEmbed{embed}
-	attachments := []*discordgo.MessageAttachment{}
-
-	return s.ChannelMessageEditComplex(&discordgo.MessageEdit{
-		ID:          messageID,
-		Channel:     channelID,
-		Embeds:      &embeds,
-		Components:  &components,
-		Attachments: &attachments,
-		Files: []*discordgo.File{
-			{
-				Name:        filename,
-				ContentType: "image/png",
-				Reader:      bytes.NewReader(imageBytes),
-			},
-		},
-	})
-}
-
-// DeferComponentUpdate acknowledges a button/select-menu click and lets the bot
-// edit the message after slower API work completes.
-func DeferComponentUpdate(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseDeferredMessageUpdate,
-	})
-
-	if err != nil {
-		log.Printf("error deferring component update: %v", err)
+		Attachments: &[]discord.AttachmentUpdate{},
+		Files:       []*discord.File{discord.NewFile(filename, alt, bytes.NewReader(png))},
 	}
 }
 
-// UpdateComponentMessage updates the original message attached to a component.
-func UpdateComponentMessage(
-	s *discordgo.Session,
-	i *discordgo.InteractionCreate,
-	embed *discordgo.MessageEmbed,
-	components []discordgo.MessageComponent,
-) {
-	embeds := []*discordgo.MessageEmbed{embed}
-	attachments := []*discordgo.MessageAttachment{}
-
-	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-		Embeds:      &embeds,
-		Components:  &components,
-		Attachments: &attachments,
-	})
-
-	if err != nil {
-		log.Printf("error updating component message: %v", err)
+// EmbedUpdate swaps a message's content for an embed, removing any attachment.
+func EmbedUpdate(embed discord.Embed, components []discord.LayoutComponent) discord.MessageUpdate {
+	if components == nil {
+		components = []discord.LayoutComponent{} // an empty list removes old buttons
 	}
-}
-
-// RespondEphemeralToComponent sends a private message for a component click.
-func RespondEphemeralToComponent(s *discordgo.Session, i *discordgo.InteractionCreate, message string) {
-	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Content: message,
-			Flags:   discordgo.MessageFlagsEphemeral,
-		},
-	})
-
-	if err != nil {
-		log.Printf("error responding ephemerally to component: %v", err)
+	return discord.MessageUpdate{
+		Embeds:      &[]discord.Embed{embed},
+		Components:  &components,
+		Attachments: &[]discord.AttachmentUpdate{},
 	}
 }

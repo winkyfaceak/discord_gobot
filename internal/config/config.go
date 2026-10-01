@@ -2,8 +2,11 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strings"
+
+	"github.com/disgoorg/snowflake/v2"
 )
 
 // Config stores all values the bot needs from the outside world
@@ -22,34 +25,44 @@ type Config struct {
 	// If set, slash commands are registered only inside this server
 	// This is much faster while developing
 	//
-	// If empty, slash commands are registered globally
-	GuildID string
+	// If zero, slash commands are registered globally
+	GuildID snowflake.ID
 
-	// AppID is optional.
-	//
-	// This is your Discord application/client ID
-	// If empty, the bot will try to discover it from the logged-in bot user
-	AppID string
+	// Navidrome login for /music. The music command is only registered when
+	// NavidromeUser is set.
+	NavidromeURL      string
+	NavidromeUser     string
+	NavidromePassword string
 }
 
 // Load reads configuration from environment variables
 //
-// In fish, set them like this:
-//
-//	set -Ux DISCORD_TOKEN "your_raw_bot_token_here"
-//	set -Ux GUILD_ID "your_test_server_id_here"
-//
-// GUILD_ID and APP_ID are optional
+// Required: DISCORD_TOKEN
+// Optional: GUILD_ID, NAVIDROME_URL (default http://127.0.0.1:4533),
+// NAVIDROME_USER, NAVIDROME_PASSWORD
 func Load() (Config, error) {
 	cfg := Config{
-		Token:   strings.TrimSpace(os.Getenv("DISCORD_TOKEN")),
-		GuildID: strings.TrimSpace(os.Getenv("GUILD_ID")),
-		AppID:   strings.TrimSpace(os.Getenv("APP_ID")),
+		Token:             strings.TrimSpace(os.Getenv("DISCORD_TOKEN")),
+		NavidromeURL:      strings.TrimSpace(os.Getenv("NAVIDROME_URL")),
+		NavidromeUser:     strings.TrimSpace(os.Getenv("NAVIDROME_USER")),
+		NavidromePassword: os.Getenv("NAVIDROME_PASSWORD"),
 	}
 
 	// The bot cannot run without a token, so fail early with a clear message
 	if cfg.Token == "" {
 		return Config{}, errors.New("DISCORD_TOKEN is not set")
+	}
+
+	if guildID := strings.TrimSpace(os.Getenv("GUILD_ID")); guildID != "" {
+		id, err := snowflake.Parse(guildID)
+		if err != nil {
+			return Config{}, fmt.Errorf("GUILD_ID is not a valid server ID: %w", err)
+		}
+		cfg.GuildID = id
+	}
+
+	if cfg.NavidromeURL == "" {
+		cfg.NavidromeURL = "http://127.0.0.1:4533"
 	}
 
 	return cfg, nil
