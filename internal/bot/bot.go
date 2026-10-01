@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"discord_gobot/internal/alerts"
 	"discord_gobot/internal/commands"
 	"discord_gobot/internal/config"
 
@@ -124,11 +125,16 @@ func (b *Bot) Run() error {
 		return fmt.Errorf("open Discord gateway: %w", err)
 	}
 
-	log.Println("Bot is running. Press CTRL+C to stop.")
-
 	// Wait for CTRL+C or a termination signal (systemctl stop sends SIGTERM)
 	stopCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	if b.cfg.NtfyToken != "" {
+		go alerts.Forward(stopCtx, client, b.cfg.NtfyURL, b.cfg.NtfyTopic, b.cfg.NtfyToken)
+		log.Printf("Forwarding ntfy topic %q to the app owner's DMs.", b.cfg.NtfyTopic)
+	}
+
+	log.Println("Bot is running. Press CTRL+C to stop.")
 	<-stopCtx.Done()
 
 	for _, cmd := range b.commands {

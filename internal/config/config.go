@@ -34,6 +34,12 @@ type Config struct {
 	NavidromeUser     string
 	NavidromePassword string
 
+	// ntfy topic whose messages are DMed to the app owner. Alerts are only
+	// forwarded when NtfyToken (read access to the topic) is set.
+	NtfyURL   string
+	NtfyTopic string
+	NtfyToken string
+
 	// StateDir is where the bot keeps data across restarts (reminders).
 	// systemd's StateDirectory= sets STATE_DIRECTORY; defaults to the
 	// working directory.
@@ -44,7 +50,8 @@ type Config struct {
 //
 // Required: DISCORD_TOKEN
 // Optional: GUILD_ID, NAVIDROME_URL (default http://127.0.0.1:4533),
-// NAVIDROME_USER, NAVIDROME_PASSWORD, STATE_DIRECTORY
+// NAVIDROME_USER, NAVIDROME_PASSWORD, STATE_DIRECTORY,
+// NTFY_TOKEN, NTFY_URL (default http://127.0.0.1:2586), NTFY_TOPIC (default homelab)
 func Load() (Config, error) {
 	cfg := Config{
 		Token:             strings.TrimSpace(os.Getenv("DISCORD_TOKEN")),
@@ -52,6 +59,9 @@ func Load() (Config, error) {
 		NavidromeUser:     strings.TrimSpace(os.Getenv("NAVIDROME_USER")),
 		NavidromePassword: os.Getenv("NAVIDROME_PASSWORD"),
 		StateDir:          os.Getenv("STATE_DIRECTORY"),
+		NtfyURL:           strings.TrimSpace(os.Getenv("NTFY_URL")),
+		NtfyTopic:         strings.TrimSpace(os.Getenv("NTFY_TOPIC")),
+		NtfyToken:         strings.TrimSpace(os.Getenv("NTFY_TOKEN")),
 	}
 
 	// The bot cannot run without a token, so fail early with a clear message
@@ -69,6 +79,13 @@ func Load() (Config, error) {
 
 	if cfg.StateDir == "" {
 		cfg.StateDir = "."
+	}
+
+	if cfg.NtfyURL == "" {
+		cfg.NtfyURL = "http://127.0.0.1:2586"
+	}
+	if cfg.NtfyTopic == "" {
+		cfg.NtfyTopic = "homelab"
 	}
 
 	if cfg.NavidromeURL == "" {

@@ -20,6 +20,8 @@ scoreboards, and music from a Navidrome library played in voice channels.
   with automatic refresh, roster paging, and owner-controlled closure.
 - Music from your own Navidrome library in voice channels, with library
   autocomplete, a queue, and "now playing" cards.
+- Home lab alerts from ntfy (service failures, disk space, temperatures)
+  forwarded to the app owner's Discord DMs.
 - Runs as a NixOS systemd service with graceful shutdown.
 
 ## Commands
@@ -86,6 +88,9 @@ that case the card still displays the reported player totals and server status.
 | `NAVIDROME_USER` | No | Navidrome login for `/music`. Without it, `/music` isn't registered. |
 | `NAVIDROME_PASSWORD` | With `NAVIDROME_USER` | Password for that Navidrome login. |
 | `NAVIDROME_URL` | No | Navidrome address. Defaults to `http://127.0.0.1:4533`. |
+| `NTFY_TOKEN` | No | ntfy token with read access to the alerts topic. When set, every alert on it is DMed to the owner of the Discord app. |
+| `NTFY_URL` | No | ntfy address. Defaults to `http://127.0.0.1:2586`. |
+| `NTFY_TOPIC` | No | ntfy topic to forward. Defaults to `homelab`. |
 | `STATE_DIRECTORY` | No | Where `/remind` saves reminders (`reminders.json`). Set by systemd's `StateDirectory=`; defaults to the working directory. |
 
 The bot opens outbound Discord/web requests, outbound UDP for voice and
@@ -150,6 +155,7 @@ go test ./...
 ```text
 .
 |-- main.go                    # Application entrypoint
+|-- internal/alerts            # ntfy alerts forwarded to the owner's DMs
 |-- internal/bot               # Discord connection and interaction routing
 |-- internal/commands          # Slash commands and component handlers
 |-- internal/config            # Environment-based configuration
