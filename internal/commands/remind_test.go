@@ -47,8 +47,18 @@ func TestRemindersSurviveARestart(t *testing.T) {
 	}
 
 	saved, err := loadReminders(path)
-	if err != nil || len(saved) != 1 || saved[0] != rem {
+	if err != nil || len(saved) != 1 {
 		t.Fatalf("loadReminders() = %+v, %v; want [%+v]", saved, err, rem)
+	}
+	// Times must be compared with Equal: the reload can pick a different
+	// (equivalent) *Location, which == would treat as different
+	got := saved[0]
+	if !got.Due.Equal(rem.Due) {
+		t.Fatalf("reloaded due = %v, want %v", got.Due, rem.Due)
+	}
+	got.Due = rem.Due
+	if got != rem {
+		t.Fatalf("reloaded reminder = %+v, want %+v", got, rem)
 	}
 	if missing, err := loadReminders(filepath.Join(t.TempDir(), "none.json")); err != nil || missing != nil {
 		t.Fatalf("loadReminders(missing) = %v, %v; want nothing", missing, err)
