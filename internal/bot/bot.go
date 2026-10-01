@@ -93,6 +93,7 @@ func (b *Bot) Run() error {
 		// Discord requires DAVE end-to-end encryption for voice
 		disgobot.WithVoiceManagerConfigOpts(voice.WithDaveSessionCreateFunc(golibdave.NewSession)),
 		disgobot.WithEventListenerFunc(onReady),
+		disgobot.WithEventListenerFunc(b.removeStaleGuildCommands),
 		disgobot.WithEventListenerFunc(b.onCommand),
 		disgobot.WithEventListenerFunc(b.onComponent),
 		disgobot.WithEventListenerFunc(b.onAutocomplete),
@@ -174,6 +175,32 @@ func (b *Bot) registerCommands(client *disgobot.Client) error {
 	}
 
 	return nil
+}
+
+// removeStaleGuildCommands deletes server-only commands left over from runs
+// with GUILD_ID set. Global registration never touches them, so removed
+// commands would otherwise linger in that server.
+func (b *Bot) removeStaleGuildCommands(e *events.GuildReady) {
+	if b.cfg.GuildID != 0 {
+		return
+	}
+	client := e.Client()
+	stale, err := client.Rest.GetGuildCommands(client.ApplicationID, e.GuildID, false)
+	if err != nil || len(stale) == 0 {
+		if err != nil {
+			log.Printf("check server-only commands in %s: %v", e.GuildID, err)
+		}
+		return
+	}
+	if _, err := client.Rest.SetGuildCommands(client.ApplicationID, e.GuildID, []discord.ApplicationCommandCreate{}); err != nil {
+		log.Printf("remove server-only commands in %s: %v", e.GuildID, err)
+		return
+	}
+	names := make([]string, 0, len(stale))
+	for _, cmd := range stale {
+		names = append(names, "/"+cmd.Name())
+	}
+	log.Printf("Removed %d old server-only commands from %s: %s", len(stale), e.Guild.Name, strings.Join(names, " "))
 }
 
 // onReady runs when Discord confirms the bot is connected
