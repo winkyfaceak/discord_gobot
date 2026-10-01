@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"bytes"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -41,9 +43,14 @@ func TestRemindersSurviveARestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "reminders.json")
 	first := NewRemind(path)
 	rem := reminder{ID: "abc", ChannelID: 1, CreatorID: 2, TargetID: 3, Message: "raid", Due: time.Now().Add(time.Hour).Round(0)}
-	first.reminders[rem.ID] = rem
+	withToken := rem
+	withToken.token = "interaction-token"
+	first.reminders[rem.ID] = withToken
 	if err := first.saveLocked(); err != nil {
 		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(path); bytes.Contains(data, []byte("interaction-token")) {
+		t.Fatal("interaction token was written to disk")
 	}
 
 	saved, err := loadReminders(path)

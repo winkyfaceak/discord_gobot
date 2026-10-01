@@ -45,6 +45,12 @@ type reminder struct {
 	TargetID  snowflake.ID `json:"target_id"`
 	Message   string       `json:"message"`
 	Due       time.Time    `json:"due"`
+
+	// The private confirmation can only be edited through the interaction
+	// token, which Discord expires after 15 minutes. Kept in memory only.
+	appID        snowflake.ID
+	token        string
+	tokenExpires time.Time
 }
 
 func NewRemind(path string) *Remind {
@@ -130,6 +136,10 @@ func (r *Remind) Handle(e *events.ApplicationCommandInteractionCreate) {
 		TargetID:  targetID,
 		Message:   strings.TrimSpace(data.String("what")),
 		Due:       due,
+
+		appID:        e.ApplicationID(),
+		token:        e.Token(),
+		tokenExpires: time.Now().Add(14 * time.Minute),
 	}
 
 	if problem := r.add(rem); problem != "" {
@@ -139,6 +149,7 @@ func (r *Remind) Handle(e *events.ApplicationCommandInteractionCreate) {
 
 	err := e.CreateMessage(discord.MessageCreate{
 		Content: fmt.Sprintf("⏰ I'll remind <@%s> <t:%d:R> (<t:%d:f>): %s", targetID, due.Unix(), due.Unix(), rem.Message),
+		Flags:   discord.MessageFlagEphemeral, // only the person setting it sees this
 		Components: []discord.LayoutComponent{
 			discord.NewActionRow(discord.NewSecondaryButton("Cancel reminder", remindCancelPrefix+rem.ID)),
 		},
@@ -156,7 +167,11 @@ func (r *Remind) HandleComponent(e *events.ComponentInteractionCreate) {
 	rem, found, allowed := r.cancel(id, e.User().ID)
 	switch {
 	case !found:
-		discordutil.Reply(e, "That reminder already went off or was cancelled.", true)
+		// A button left over from a reminder that already went off
+		content := e.Message.Content + "\n-# This reminder already went off or was cancelled."
+		if err := e.UpdateMessage(discord.MessageUpdate{Content: &content, Components: &[]discord.LayoutComponent{}}); err != nil {
+			log.Printf("remind: update stale %s: %v", id, err)
+		}
 	case !allowed:
 		discordutil.Reply(e, "Only the person who set this reminder, or the person it's for, can cancel it.", true)
 	default:
@@ -235,6 +250,14 @@ func (r *Remind) fire(id string) {
 	})
 	if err != nil {
 		log.Printf("remind: send %s: %v", id, err)
+	}
+
+	// Drop the Cancel button from the confirmation while Discord still allows edits
+	if rem.token != "" && time.Now().Before(rem.tokenExpires) {
+		done := fmt.Sprintf("✅ Reminded <@%s>: %s", rem.TargetID, rem.Message)
+		if _, err := client.Rest.UpdateInteractionResponse(rem.appID, rem.token, discord.MessageUpdate{Content: &done, Components: &[]discord.LayoutComponent{}}); err != nil {
+			log.Printf("remind: update confirmation %s: %v", id, err)
+		}
 	}
 }
 
