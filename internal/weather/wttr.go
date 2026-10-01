@@ -1,16 +1,18 @@
 package weather
 
 import (
-	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
-	"os/exec"
 	"strings"
 	"time"
 )
 
-// FetchWttr uses curl to fetch weather from wttr.in
+var httpClient = &http.Client{Timeout: 10 * time.Second}
+
+// FetchWttr fetches plain-text weather from wttr.in
 //
 // location examples:
 //   - Dublin
@@ -35,36 +37,28 @@ func FetchWttr(location string, units string, view string) (string, error) {
 		return "", errors.New("location is required")
 	}
 
-	requestURL := buildWttrURL(location, units, view)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(
-		ctx,
-		"curl",
-		"-sS",
-		"--fail",
-		"--max-time",
-		"8",
-		requestURL,
-	)
-
-	output, err := cmd.CombinedOutput()
-	if ctx.Err() == context.DeadlineExceeded {
-		return "", errors.New("weather request timed out")
-	}
-
+	req, err := http.NewRequest(http.MethodGet, buildWttrURL(location, units, view), nil)
 	if err != nil {
-		msg := strings.TrimSpace(string(output))
-		if msg == "" {
-			msg = err.Error()
-		}
+		return "", err
+	}
+	// wttr.in serves HTML to browsers and plain text to terminal clients
+	req.Header.Set("User-Agent", "curl/8")
 
-		return "", fmt.Errorf("curl wttr.in failed: %s", msg)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("wttr.in request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("read wttr.in response: %w", err)
 	}
 
-	result := strings.TrimSpace(string(output))
+	result := strings.TrimSpace(string(body))
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("wttr.in returned %s", resp.Status)
+	}
 	if result == "" {
 		return "", errors.New("wttr.in returned an empty response")
 	}

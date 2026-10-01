@@ -14,9 +14,8 @@ import (
 
 // Client talks to Deadlock API over HTTP.
 type Client struct {
-	baseURL       string
-	assetsBaseURL string
-	httpClient    *http.Client
+	baseURL    string
+	httpClient *http.Client
 }
 
 // NewClient creates a Deadlock API client.
@@ -28,9 +27,8 @@ func NewClient(httpClient *http.Client) *Client {
 	}
 
 	return &Client{
-		baseURL:       "https://api.deadlock-api.com",
-		assetsBaseURL: "https://assets.deadlock-api.com",
-		httpClient:    httpClient,
+		baseURL:    "https://api.deadlock-api.com",
+		httpClient: httpClient,
 	}
 }
 
@@ -152,45 +150,26 @@ func (c *Client) BuildItemStats(ctx context.Context, heroID int32) ([]BuildItemS
 	return stats, nil
 }
 
-// HeroAssets fetches hero metadata from the static assets API.
-func (c *Client) HeroAssets(ctx context.Context) (any, error) {
-	var payload any
-	err := c.getJSONFromBase(ctx, c.assetsBaseURL, "/v2/heroes", nil, &payload)
-	if err != nil {
-		return nil, err
-	}
-
-	return payload, nil
+// HeroAssets fetches hero names and icons.
+func (c *Client) HeroAssets(ctx context.Context) ([]heroAsset, error) {
+	var heroes []heroAsset
+	return heroes, c.getJSON(ctx, "/v1/assets/heroes", nil, &heroes)
 }
 
-// ItemAssets fetches item metadata from the static assets API.
-func (c *Client) ItemAssets(ctx context.Context) (any, error) {
-	var payload any
-	err := c.getJSONFromBase(ctx, c.assetsBaseURL, "/v2/items", nil, &payload)
-	if err != nil {
-		return nil, err
-	}
-
-	return payload, nil
+// ItemAssets fetches item names and icons.
+func (c *Client) ItemAssets(ctx context.Context) ([]itemAsset, error) {
+	var items []itemAsset
+	return items, c.getJSON(ctx, "/v1/assets/items", nil, &items)
 }
 
-// RankAssets fetches rank metadata from the static assets API.
-func (c *Client) RankAssets(ctx context.Context) (any, error) {
-	var payload any
-	err := c.getJSONFromBase(ctx, c.assetsBaseURL, "/v2/ranks", nil, &payload)
-	if err != nil {
-		return nil, err
-	}
-
-	return payload, nil
+// RankAssets fetches rank names and badge images.
+func (c *Client) RankAssets(ctx context.Context) ([]rankAsset, error) {
+	var ranks []rankAsset
+	return ranks, c.getJSON(ctx, "/v1/assets/ranks", nil, &ranks)
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, query url.Values, target any) error {
-	return c.getJSONFromBase(ctx, c.baseURL, path, query, target)
-}
-
-func (c *Client) getJSONFromBase(ctx context.Context, baseURL string, path string, query url.Values, target any) error {
-	fullURL := strings.TrimRight(baseURL, "/") + path
+	fullURL := c.baseURL + path
 
 	if len(query) > 0 {
 		fullURL += "?" + query.Encode()
@@ -212,7 +191,7 @@ func (c *Client) getJSONFromBase(ctx context.Context, baseURL string, path strin
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 500))
-		return fmt.Errorf("Deadlock API returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return fmt.Errorf("deadlock API returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(target); err != nil {

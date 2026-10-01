@@ -53,7 +53,7 @@ type MatchHistoryEntry struct {
 
 // AssetDetails is the small static-asset shape the bot needs for Discord UI.
 type AssetDetails struct {
-	ID       int32
+	ID       int64
 	Name     string
 	IconURL  string
 	ImageURL string
@@ -122,15 +122,6 @@ func (r RankPrediction) DisplayName() string {
 	}
 
 	return "Unknown rank"
-}
-
-// RankStatus is a display object for a player's predicted rank.
-type RankStatus struct {
-	AccountID  int64
-	Name       string
-	ProfileURL string
-	Avatar     string
-	Rank       *RankPrediction
 }
 
 // ActiveMatch represents one match from /v1/matches/active.
@@ -244,7 +235,7 @@ type HeroBuildInsight struct {
 }
 
 type ItemBuildInsight struct {
-	ItemID  int32
+	ItemID  int64
 	Name    string
 	IconURL string
 	Builds  int64

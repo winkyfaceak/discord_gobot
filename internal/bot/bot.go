@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -143,12 +144,10 @@ func (b *Bot) Run() error {
 
 	log.Println("Bot is running. Press CTRL+C to stop.")
 
-	// Wait for CTRL+C or a termination signal
-	//
-	// Without this, main would exit immediately and the bot would disconnect
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
-	<-stop
+	// Wait for CTRL+C or a termination signal (docker stop sends SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
 
 	for _, cmd := range b.commands {
 		if shutdownCommand, ok := cmd.(commands.ShutdownCommand); ok {
@@ -185,26 +184,26 @@ func (b *Bot) resolveAppID() (string, error) {
 	return user.ID, nil
 }
 
-// registerCommands sends each command definition to Discord
+// registerCommands replaces the app's command list with ours in one call.
+//
+// Bulk overwrite is idempotent, so restarts don't burn Discord's daily
+// command-create limit, and commands removed from the code disappear.
 //
 // If GUILD_ID is set, commands are registered to that one server
 // If GUILD_ID is empty, commands are registered globally
 func (b *Bot) registerCommands(appID string) error {
-	log.Println("Registering slash commands...")
-
+	defs := make([]*discordgo.ApplicationCommand, 0, len(b.commands))
 	for _, cmd := range b.commands {
-		def := cmd.Definition()
+		defs = append(defs, cmd.Definition())
+	}
 
-		created, err := b.session.ApplicationCommandCreate(
-			appID,
-			b.cfg.GuildID,
-			def,
-		)
-		if err != nil {
-			return fmt.Errorf("register command /%s: %w", def.Name, err)
-		}
+	created, err := b.session.ApplicationCommandBulkOverwrite(appID, b.cfg.GuildID, defs)
+	if err != nil {
+		return fmt.Errorf("register slash commands: %w", err)
+	}
 
-		log.Printf("Registered command: /%s", created.Name)
+	for _, cmd := range created {
+		log.Printf("Registered command: /%s", cmd.Name)
 	}
 
 	return nil
@@ -217,11 +216,7 @@ func (b *Bot) onReady(s *discordgo.Session, r *discordgo.Ready) {
 		return
 	}
 
-	log.Printf(
-		"Logged in as %s#%s",
-		s.State.User.Username,
-		s.State.User.Discriminator,
-	)
+	log.Printf("Logged in as %s", s.State.User.Username)
 }
 
 // onInteractionCreate runs when a Discord interaction is created.

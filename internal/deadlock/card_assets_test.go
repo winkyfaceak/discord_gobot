@@ -52,3 +52,19 @@ func TestCardAssetLoaderRejectsUnusableResources(t *testing.T) {
 		t.Fatalf("DataURI() accepted non-image bytes: %q", got)
 	}
 }
+
+func TestAssetSnapshotRankUsesTierNameAndSubrankImage(t *testing.T) {
+	snapshot := &AssetSnapshot{Ranks: map[int32]rankAsset{
+		6: {Tier: 6, Name: "Ritualist", Images: map[string]string{"large": "large.png", "large_subrank2": "sub2.png"}},
+	}}
+
+	if got := snapshot.Rank(62); got.Name != "Ritualist" || got.IconURL != "sub2.png" {
+		t.Fatalf("Rank(62) = %+v", got)
+	}
+	if got := snapshot.Rank(60); got.IconURL != "large.png" {
+		t.Fatalf("Rank(60) = %+v, want large image fallback", got)
+	}
+	if got := snapshot.Rank(99); got.Name != "" {
+		t.Fatalf("Rank(99) = %+v, want unknown tier", got)
+	}
+}

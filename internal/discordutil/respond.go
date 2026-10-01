@@ -7,6 +7,9 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+// noMentions stops user-supplied text (e.g. /echo @everyone) from pinging anyone.
+var noMentions = &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}}
+
 // Respond sends an immediate response to a slash command interaction.
 //
 // Use this for fast commands like /ping.
@@ -20,8 +23,9 @@ func Respond(s *discordgo.Session, i *discordgo.InteractionCreate, message strin
 	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
-			Content: message,
-			Flags:   flags,
+			Content:         message,
+			Flags:           flags,
+			AllowedMentions: noMentions,
 		},
 	})
 
@@ -34,7 +38,7 @@ func Respond(s *discordgo.Session, i *discordgo.InteractionCreate, message strin
 //
 //	"I received the command, but I need more time."
 //
-// Use this before slow work such as curl, HTTP APIs, or database calls
+// Use this before slow work such as HTTP APIs or database calls
 func Defer(s *discordgo.Session, i *discordgo.InteractionCreate, private bool) {
 	flags := discordgo.MessageFlags(0)
 
@@ -57,7 +61,8 @@ func Defer(s *discordgo.Session, i *discordgo.InteractionCreate, private bool) {
 // EditOriginal replaces the deferred response with final content
 func EditOriginal(s *discordgo.Session, i *discordgo.InteractionCreate, message string) {
 	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-		Content: &message,
+		Content:         &message,
+		AllowedMentions: noMentions,
 	})
 
 	if err != nil {
@@ -76,8 +81,9 @@ func FollowUp(s *discordgo.Session, i *discordgo.InteractionCreate, message stri
 	}
 
 	_, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
-		Content: message,
-		Flags:   flags,
+		Content:         message,
+		Flags:           flags,
+		AllowedMentions: noMentions,
 	})
 
 	if err != nil {
@@ -244,35 +250,6 @@ func UpdateComponentMessage(
 	if err != nil {
 		log.Printf("error updating component message: %v", err)
 	}
-}
-
-// UpdateComponentImageWithComponents replaces an interactive response image
-// and controls after a component update has been deferred.
-func UpdateComponentImageWithComponents(
-	s *discordgo.Session,
-	i *discordgo.InteractionCreate,
-	filename string,
-	imageBytes []byte,
-	embed *discordgo.MessageEmbed,
-	components []discordgo.MessageComponent,
-) error {
-	embeds := []*discordgo.MessageEmbed{embed}
-	attachments := []*discordgo.MessageAttachment{}
-
-	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-		Embeds:      &embeds,
-		Components:  &components,
-		Attachments: &attachments,
-		Files: []*discordgo.File{
-			{
-				Name:        filename,
-				ContentType: "image/png",
-				Reader:      bytes.NewReader(imageBytes),
-			},
-		},
-	})
-
-	return err
 }
 
 // RespondEphemeralToComponent sends a private message for a component click.

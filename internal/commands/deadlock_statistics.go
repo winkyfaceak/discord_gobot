@@ -8,7 +8,6 @@ import (
 	"log"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -37,16 +36,6 @@ const (
 // DeadlockStatistics implements the /deadlock-statistics command.
 type DeadlockStatistics struct {
 	service *deadlockapi.Service
-
-	mu       sync.Mutex
-	sessions map[string]deadlockSession
-}
-
-type deadlockSession struct {
-	Profile      deadlockapi.SteamProfile
-	RecentLimit  int
-	UseRankImage bool
-	UpdatedAt    time.Time
 }
 
 type deadlockComponentState struct {
@@ -64,10 +53,7 @@ func NewDeadlockStatistics(service *deadlockapi.Service) *DeadlockStatistics {
 		service = deadlockapi.NewService(deadlockapi.NewClient(nil))
 	}
 
-	return &DeadlockStatistics{
-		service:  service,
-		sessions: make(map[string]deadlockSession),
-	}
+	return &DeadlockStatistics{service: service}
 }
 
 func (d *DeadlockStatistics) ComponentPrefix() string {
@@ -105,7 +91,7 @@ func (d *DeadlockStatistics) Definition() *discordgo.ApplicationCommand {
 				Name:        "recent-count",
 				Description: "How many recent games to keep available, from 1 to 20. Defaults to 10.",
 				Required:    false,
-				MinValue:    floatPtr(1),
+				MinValue:    new(1.0),
 				MaxValue:    maxDeadlockRecentLimit,
 			},
 			{
@@ -161,7 +147,7 @@ func (d *DeadlockStatistics) Handle(s *discordgo.Session, i *discordgo.Interacti
 	if recentOption, ok := options["recent-count"]; ok {
 		recentLimit = int(recentOption.IntValue())
 	}
-	recentLimit = clampInt(recentLimit, 1, maxDeadlockRecentLimit)
+	recentLimit = min(max(recentLimit, 1), maxDeadlockRecentLimit)
 
 	useRankImage := true
 	if rankImageOption, ok := options["rank-image"]; ok {
@@ -198,17 +184,8 @@ func (d *DeadlockStatistics) Handle(s *discordgo.Session, i *discordgo.Interacti
 		return
 	}
 
-	ownerID := interactionUserID(i)
-	profile := deadlockapi.SteamProfile{
-		AccountID:   summary.AccountID,
-		PersonaName: summary.Name,
-		ProfileURL:  summary.ProfileURL,
-		Avatar:      summary.Avatar,
-	}
-	d.storeSession(ownerID, profile, recentLimit, useRankImage)
-
 	state := deadlockComponentState{
-		OwnerID:      ownerID,
+		OwnerID:      interactionUserID(i),
 		AccountID:    summary.AccountID,
 		View:         view,
 		Page:         0,
@@ -266,7 +243,7 @@ func (d *DeadlockStatistics) HandleComponent(s *discordgo.Session, i *discordgo.
 
 	discordutil.DeferComponentUpdate(s, i)
 
-	profile := d.sessionProfile(state)
+	profile := deadlockapi.SteamProfile{AccountID: state.AccountID}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -282,17 +259,10 @@ func (d *DeadlockStatistics) HandleComponent(s *discordgo.Session, i *discordgo.
 		return
 	}
 
-	if profile.DisplayName() == fmt.Sprintf("Account %d", state.AccountID) {
-		profile.PersonaName = summary.Name
-		profile.ProfileURL = summary.ProfileURL
-		profile.Avatar = summary.Avatar
-	}
-	d.storeSession(state.OwnerID, profile, state.RecentLimit, state.UseRankImage)
-
 	state.Page = clampRecentPage(state.Page, len(summary.RecentMatches))
 	components := buildDeadlockComponents(state, len(summary.RecentMatches))
 	if filename, png, imageEmbed, renderErr := renderDeadlockCard(ctx, *summary, state); renderErr == nil {
-		if editErr := discordutil.UpdateComponentImageWithComponents(s, i, filename, png, imageEmbed, components); editErr == nil {
+		if _, editErr := discordutil.EditOriginalImageWithComponents(s, i, filename, png, imageEmbed, components); editErr == nil {
 			return
 		} else {
 			log.Printf("error updating interactive Deadlock image card: %v", editErr)
@@ -351,7 +321,7 @@ func buildDeadlockEmbed(summary deadlockapi.PlayerSummary, state deadlockCompone
 func buildDeadlockOverviewEmbed(summary deadlockapi.PlayerSummary) *discordgo.MessageEmbed {
 	fields := summaryFields(summary)
 
-	recent := formatRecentDeadlockMatches(summary.RecentMatches[:minInt(len(summary.RecentMatches), 3)])
+	recent := formatRecentDeadlockMatches(summary.RecentMatches[:min(len(summary.RecentMatches), 3)])
 	if recent != "" {
 		fields = append(fields, &discordgo.MessageEmbedField{
 			Name:   "🕘 Latest Games",
@@ -384,7 +354,7 @@ func buildDeadlockAllSnapshotEmbed(summary deadlockapi.PlayerSummary, useRankIma
 	fields := summaryFields(summary)
 	fields = append(fields, rankFieldFromSummary(summary), currentGameFieldFromSummary(summary), buildFieldFromSummary(summary))
 
-	recent := formatRecentDeadlockMatches(summary.RecentMatches[:minInt(len(summary.RecentMatches), 5)])
+	recent := formatRecentDeadlockMatches(summary.RecentMatches[:min(len(summary.RecentMatches), 5)])
 	if recent != "" {
 		fields = append(fields, &discordgo.MessageEmbedField{Name: "🕘 Recent Form", Value: recent, Inline: false})
 	}
@@ -450,7 +420,7 @@ func buildDeadlockRankEmbedFromSummary(summary deadlockapi.PlayerSummary, useRan
 func buildDeadlockRecentEmbed(summary deadlockapi.PlayerSummary, state deadlockComponentState) *discordgo.MessageEmbed {
 	page := clampRecentPage(state.Page, len(summary.RecentMatches))
 	start := page * deadlockRecentPageSize
-	end := minInt(start+deadlockRecentPageSize, len(summary.RecentMatches))
+	end := min(start+deadlockRecentPageSize, len(summary.RecentMatches))
 	pageMatches := []deadlockapi.RecentMatch{}
 	if start < len(summary.RecentMatches) {
 		pageMatches = summary.RecentMatches[start:end]
@@ -733,13 +703,13 @@ func formatActiveRoster(match *deadlockapi.ActiveMatch) string {
 
 	sections := []string{}
 	if len(team0) > 0 {
-		sections = append(sections, "**Team 0**\n"+strings.Join(team0[:minInt(len(team0), 6)], "\n"))
+		sections = append(sections, "**Team 0**\n"+strings.Join(team0[:min(len(team0), 6)], "\n"))
 	}
 	if len(team1) > 0 {
-		sections = append(sections, "**Team 1**\n"+strings.Join(team1[:minInt(len(team1), 6)], "\n"))
+		sections = append(sections, "**Team 1**\n"+strings.Join(team1[:min(len(team1), 6)], "\n"))
 	}
 	if len(unknown) > 0 {
-		sections = append(sections, "**Unknown**\n"+strings.Join(unknown[:minInt(len(unknown), 4)], "\n"))
+		sections = append(sections, "**Unknown**\n"+strings.Join(unknown[:min(len(unknown), 4)], "\n"))
 	}
 
 	return truncateDiscordField(strings.Join(sections, "\n"))
@@ -842,10 +812,6 @@ func deadlockPageButton(label string, state deadlockComponentState, delta int, r
 	return discordgo.Button{Label: label, Style: discordgo.SecondaryButton, CustomID: deadlockCustomIDWithAction(state, action), Disabled: disabled}
 }
 
-func deadlockCustomID(state deadlockComponentState) string {
-	return deadlockCustomIDWithAction(state, "open")
-}
-
 func deadlockCustomIDWithAction(state deadlockComponentState, action string) string {
 	action = strings.ReplaceAll(strings.TrimSpace(strings.ToLower(action)), ":", "_")
 	if action == "" {
@@ -893,43 +859,9 @@ func parseDeadlockComponentState(customID string) (deadlockComponentState, error
 		AccountID:    accountID,
 		View:         cleanDeadlockView(parts[4]),
 		Page:         page,
-		RecentLimit:  clampInt(recentLimit, 1, maxDeadlockRecentLimit),
+		RecentLimit:  min(max(recentLimit, 1), maxDeadlockRecentLimit),
 		UseRankImage: useRankImage,
 	}, nil
-}
-
-func (d *DeadlockStatistics) storeSession(ownerID string, profile deadlockapi.SteamProfile, recentLimit int, useRankImage bool) {
-	if ownerID == "" || profile.AccountID <= 0 {
-		return
-	}
-
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	d.sessions[deadlockSessionKey(ownerID, profile.AccountID)] = deadlockSession{
-		Profile:      profile,
-		RecentLimit:  recentLimit,
-		UseRankImage: useRankImage,
-		UpdatedAt:    time.Now(),
-	}
-}
-
-func (d *DeadlockStatistics) sessionProfile(state deadlockComponentState) deadlockapi.SteamProfile {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	key := deadlockSessionKey(state.OwnerID, state.AccountID)
-	if session, ok := d.sessions[key]; ok {
-		session.UpdatedAt = time.Now()
-		d.sessions[key] = session
-		return session.Profile
-	}
-
-	return deadlockapi.SteamProfile{AccountID: state.AccountID}
-}
-
-func deadlockSessionKey(ownerID string, accountID int64) string {
-	return ownerID + ":" + strconv.FormatInt(accountID, 10)
 }
 
 func cleanDeadlockView(view string) string {
@@ -1128,25 +1060,4 @@ func clampRecentPage(page int, recentCount int) int {
 		return maxPage
 	}
 	return page
-}
-
-func clampInt(value int, minValue int, maxValue int) int {
-	if value < minValue {
-		return minValue
-	}
-	if value > maxValue {
-		return maxValue
-	}
-	return value
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func floatPtr(value float64) *float64 {
-	return &value
 }

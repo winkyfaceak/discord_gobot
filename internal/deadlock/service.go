@@ -35,13 +35,6 @@ func NewService(client *Client) *Service {
 	}
 }
 
-// LookupPlayer searches by account name and calculates player statistics.
-func (s *Service) LookupPlayer(ctx context.Context, accountName string) (*PlayerSummary, error) {
-	return s.LookupPlayerWithOptions(ctx, accountName, PlayerLookupOptions{
-		RecentLimit: defaultRecentLimit,
-	})
-}
-
 // LookupPlayerWithOptions searches by account name, calculates player statistics,
 // and optionally attaches rank/current-game/build sections.
 func (s *Service) LookupPlayerWithOptions(ctx context.Context, accountName string, options PlayerLookupOptions) (*PlayerSummary, error) {
@@ -57,6 +50,13 @@ func (s *Service) LookupPlayerWithOptions(ctx context.Context, accountName strin
 func (s *Service) LookupPlayerByProfile(ctx context.Context, profile SteamProfile, options PlayerLookupOptions) (*PlayerSummary, error) {
 	if profile.AccountID <= 0 {
 		return nil, errors.New("account id cannot be empty")
+	}
+
+	// Button clicks only carry the account ID, so look up the Steam name
+	if profile.Persona == "" && profile.PersonaName == "" {
+		if profiles, err := s.client.SteamProfiles(ctx, []int64{profile.AccountID}); err == nil && len(profiles) > 0 {
+			profile = profiles[0]
+		}
 	}
 
 	history, err := s.client.MatchHistory(ctx, profile.AccountID)
@@ -76,11 +76,11 @@ func (s *Service) LookupPlayerByProfile(ctx context.Context, profile SteamProfil
 	s.enrichSummaryAssets(ctx, &summary)
 
 	if options.IncludeRank {
-		rank, rankErr := s.lookupRankForProfile(ctx, profile)
+		rank, rankErr := s.lookupRank(ctx, profile.AccountID)
 		if rankErr != nil {
 			summary.RankError = rankErr.Error()
-		} else if rank != nil {
-			summary.Rank = rank.Rank
+		} else {
+			summary.Rank = rank
 		}
 	}
 
@@ -105,26 +105,6 @@ func (s *Service) LookupPlayerByProfile(ctx context.Context, profile SteamProfil
 	return &summary, nil
 }
 
-// LookupRank searches by account name and returns the player's predicted rank.
-func (s *Service) LookupRank(ctx context.Context, accountName string) (*RankStatus, error) {
-	profile, err := s.resolveProfile(ctx, accountName)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.lookupRankForProfile(ctx, profile)
-}
-
-// LookupCurrentGame searches by account name and returns current-game status.
-func (s *Service) LookupCurrentGame(ctx context.Context, accountName string) (*CurrentGameStatus, error) {
-	profile, err := s.resolveProfile(ctx, accountName)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.lookupCurrentGameForProfile(ctx, profile)
-}
-
 func (s *Service) resolveProfile(ctx context.Context, accountName string) (SteamProfile, error) {
 	accountName = strings.TrimSpace(accountName)
 	if accountName == "" {
@@ -143,13 +123,13 @@ func (s *Service) resolveProfile(ctx context.Context, accountName string) (Steam
 	return bestProfileMatch(accountName, profiles), nil
 }
 
-func (s *Service) lookupRankForProfile(ctx context.Context, profile SteamProfile) (*RankStatus, error) {
-	prediction, err := s.client.RankPrediction(ctx, profile.AccountID)
+func (s *Service) lookupRank(ctx context.Context, accountID int64) (*RankPrediction, error) {
+	prediction, err := s.client.RankPrediction(ctx, accountID)
 	if err != nil {
 		return nil, err
 	}
 
-	if prediction != nil && prediction.Badge > 0 {
+	if prediction.Badge > 0 {
 		if snapshot, assetErr := s.assets.Snapshot(ctx); assetErr == nil {
 			asset := snapshot.Rank(prediction.Badge)
 			prediction.Name = asset.Name
@@ -157,13 +137,7 @@ func (s *Service) lookupRankForProfile(ctx context.Context, profile SteamProfile
 		}
 	}
 
-	return &RankStatus{
-		AccountID:  profile.AccountID,
-		Name:       profile.DisplayName(),
-		ProfileURL: profile.ProfileURL,
-		Avatar:     profile.Avatar,
-		Rank:       prediction,
-	}, nil
+	return prediction, nil
 }
 
 func (s *Service) lookupCurrentGameForProfile(ctx context.Context, profile SteamProfile) (*CurrentGameStatus, error) {
@@ -213,7 +187,7 @@ func (s *Service) lookupBuildInsights(ctx context.Context, accountID int64, hero
 		snapshot = assets
 	}
 
-	hero := AssetDetails{ID: heroID}
+	hero := AssetDetails{ID: int64(heroID)}
 	if snapshot != nil {
 		hero = snapshot.Hero(heroID)
 	}
@@ -236,7 +210,7 @@ func (s *Service) lookupBuildInsights(ctx context.Context, accountID int64, hero
 		return buildStats[i].Matches > buildStats[j].Matches
 	})
 
-	buildLimit := minInt(len(buildStats), 5)
+	buildLimit := min(len(buildStats), 5)
 	builds := make([]HeroBuildInsight, 0, buildLimit)
 	for _, stat := range buildStats[:buildLimit] {
 		builds = append(builds, HeroBuildInsight{
@@ -256,10 +230,10 @@ func (s *Service) lookupBuildInsights(ctx context.Context, accountID int64, hero
 			return itemStats[i].Builds > itemStats[j].Builds
 		})
 
-		itemLimit := minInt(len(itemStats), 8)
+		itemLimit := min(len(itemStats), 8)
 		popularItems = make([]ItemBuildInsight, 0, itemLimit)
 		for _, stat := range itemStats[:itemLimit] {
-			itemID := int32(stat.ItemID)
+			itemID := stat.ItemID
 			item := AssetDetails{ID: itemID}
 			if snapshot != nil {
 				item = snapshot.Item(itemID)
@@ -543,11 +517,4 @@ func percent64(part int64, total int64) float64 {
 	}
 
 	return float64(part) / float64(total) * 100
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -51,13 +50,8 @@ func RenderCardPNG(ctx context.Context, view CardView) ([]byte, error) {
 		return nil, fmt.Errorf("ImageMagick command 'magick' was not found: %w", err)
 	}
 
-	args := []string{}
-	if fontPath := scoreboardFontPath(); fontPath != "" {
-		args = append(args, "-font", fontPath)
-	}
-	args = append(args, "svg:-", "png:-")
-
-	cmd := exec.CommandContext(ctx, "magick", args...)
+	// Fonts come from the SVG font-family via fontconfig
+	cmd := exec.CommandContext(ctx, "magick", "svg:-", "png:-")
 	cmd.Stdin = strings.NewReader(BuildCardSVG(view))
 
 	var stdout bytes.Buffer
@@ -253,20 +247,6 @@ func yesNo(value bool) string {
 		return "YES"
 	}
 	return "NO"
-}
-
-func scoreboardFontPath() string {
-	candidates := []string{
-		"/usr/share/fonts/dejavu/DejaVuSans.ttf",
-		"/System/Library/Fonts/Helvetica.ttc",
-		"/Library/Fonts/Arial Unicode.ttf",
-	}
-	for _, candidate := range candidates {
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
-		}
-	}
-	return ""
 }
 
 func escapeSVG(value string) string {

@@ -43,11 +43,6 @@ type dashboardCardImages struct {
 
 var defaultCardAssetLoader = NewCardAssetLoader(nil)
 
-// RenderCardPNG renders the overview card for noninteractive compatibility.
-func RenderCardPNG(ctx context.Context, summary PlayerSummary) ([]byte, error) {
-	return RenderDashboardPNG(ctx, summary, CardOptions{View: CardViewOverview})
-}
-
 // RenderDashboardPNG renders a full interactive Deadlock card using ImageMagick.
 func RenderDashboardPNG(ctx context.Context, summary PlayerSummary, options CardOptions) ([]byte, error) {
 	return renderDashboardPNG(ctx, summary, options, loadDashboardCardImages(ctx, summary, options, defaultCardAssetLoader))
@@ -61,13 +56,8 @@ func renderDashboardPNG(ctx context.Context, summary PlayerSummary, options Card
 	renderImages, cleanup := materializeDashboardCardImages(images)
 	defer cleanup()
 
-	args := []string{}
-	if fontPath := deadlockCardFontPath(); fontPath != "" {
-		args = append(args, "-font", fontPath)
-	}
-	args = append(args, "svg:-", "png:-")
-
-	cmd := exec.CommandContext(ctx, "magick", args...)
+	// Fonts come from the SVG font-family via fontconfig
+	cmd := exec.CommandContext(ctx, "magick", "svg:-", "png:-")
 	cmd.Stdin = strings.NewReader(buildDashboardSVG(summary, options, renderImages))
 
 	var stdout bytes.Buffer
@@ -81,11 +71,6 @@ func renderDashboardPNG(ctx context.Context, summary PlayerSummary, options Card
 	return stdout.Bytes(), nil
 }
 
-// BuildDashboardSVG creates the image backing an interactive Deadlock response.
-func BuildDashboardSVG(summary PlayerSummary, options CardOptions) string {
-	return buildDashboardSVG(summary, options, dashboardCardImages{})
-}
-
 func loadDashboardCardImages(ctx context.Context, summary PlayerSummary, options CardOptions, loader *CardAssetLoader) dashboardCardImages {
 	images := dashboardCardImages{byURL: make(map[string]string)}
 	urls := dashboardCardAssetURLs(summary, options)
@@ -96,7 +81,6 @@ func loadDashboardCardImages(ctx context.Context, summary PlayerSummary, options
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for _, rawURL := range urls {
-		rawURL := rawURL
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -134,7 +118,7 @@ func dashboardCardAssetURLs(summary PlayerSummary, options CardOptions) []string
 	case CardViewRecent:
 		page, _ := recentPage(options.Page, len(summary.RecentMatches))
 		start := page * recentCardPageSize
-		end := minCardInt(start+recentCardPageSize, len(summary.RecentMatches))
+		end := min(start+recentCardPageSize, len(summary.RecentMatches))
 		if start < len(summary.RecentMatches) {
 			for _, match := range summary.RecentMatches[start:end] {
 				add(match.HeroIconURL)
@@ -147,7 +131,7 @@ func dashboardCardAssetURLs(summary PlayerSummary, options CardOptions) []string
 	case CardViewBuilds:
 		if summary.Build != nil {
 			add(summary.Build.HeroIconURL)
-			for _, item := range summary.Build.PopularItems[:minCardInt(5, len(summary.Build.PopularItems))] {
+			for _, item := range summary.Build.PopularItems[:min(5, len(summary.Build.PopularItems))] {
 				add(item.IconURL)
 			}
 		}
@@ -155,12 +139,12 @@ func dashboardCardAssetURLs(summary PlayerSummary, options CardOptions) []string
 		if options.UseRankImage && summary.Rank != nil {
 			add(summary.Rank.ImageURL)
 		}
-		for _, match := range summary.RecentMatches[:minCardInt(3, len(summary.RecentMatches))] {
+		for _, match := range summary.RecentMatches[:min(3, len(summary.RecentMatches))] {
 			add(match.HeroIconURL)
 		}
 	default:
 		add(summary.TopHeroIconURL)
-		for _, match := range summary.RecentMatches[:minCardInt(4, len(summary.RecentMatches))] {
+		for _, match := range summary.RecentMatches[:min(4, len(summary.RecentMatches))] {
 			add(match.HeroIconURL)
 		}
 	}
@@ -286,7 +270,7 @@ func writeOverviewCard(b *strings.Builder, summary PlayerSummary, accent string,
 
 	b.WriteString(`<rect x="512" y="344" width="828" height="426" rx="4" fill="#151a1d" stroke="#303739"/>`)
 	fmt.Fprintf(b, `<text x="538" y="382" font-family="DejaVu Sans" font-size="13" letter-spacing="3" fill="%s">RECENT FORM</text>`, accent)
-	matches := summary.RecentMatches[:minCardInt(len(summary.RecentMatches), 4)]
+	matches := summary.RecentMatches[:min(len(summary.RecentMatches), 4)]
 	if len(matches) == 0 {
 		writeCardEmpty(b, 926, 554, "NO RECENT MATCHES RETURNED")
 		return
@@ -328,7 +312,7 @@ func writeRecentCard(b *strings.Builder, summary PlayerSummary, requestedPage in
 	b.WriteString(`<rect x="82" y="284" width="1236" height="42" fill="#242a2d"/><text x="102" y="311" font-family="DejaVu Sans" font-size="12" letter-spacing="2" fill="#a9a392">RESULT</text><text x="300" y="311" font-family="DejaVu Sans" font-size="12" letter-spacing="2" fill="#a9a392">HERO</text><text x="668" y="311" font-family="DejaVu Sans" font-size="12" letter-spacing="2" fill="#a9a392">K / D / A</text><text x="885" y="311" font-family="DejaVu Sans" font-size="12" letter-spacing="2" fill="#a9a392">SOULS</text><text x="1064" y="311" font-family="DejaVu Sans" font-size="12" letter-spacing="2" fill="#a9a392">TIME</text><text x="1220" y="311" font-family="DejaVu Sans" font-size="12" letter-spacing="2" fill="#a9a392">MATCH</text>`)
 
 	start := page * recentCardPageSize
-	end := minCardInt(start+recentCardPageSize, len(summary.RecentMatches))
+	end := min(start+recentCardPageSize, len(summary.RecentMatches))
 	if start >= len(summary.RecentMatches) {
 		writeCardEmpty(b, 700, 520, "NO RECENT MATCHES RETURNED")
 		return
@@ -394,7 +378,7 @@ func writeBuildsCard(b *strings.Builder, summary PlayerSummary, accent string, i
 	if len(build.Builds) == 0 {
 		writeCardEmpty(b, 457, 558, "NO BUILDS RETURNED")
 	} else {
-		for index, row := range build.Builds[:minCardInt(4, len(build.Builds))] {
+		for index, row := range build.Builds[:min(4, len(build.Builds))] {
 			y := 464 + index*59
 			fmt.Fprintf(b, `<text x="116" y="%d" font-family="DejaVu Sans Mono" font-size="16" fill="#a09a8b">#%d</text><text x="168" y="%d" font-family="DejaVu Sans" font-size="17" fill="#e9e1d3">BUILD %d</text><text x="450" y="%d" font-family="DejaVu Sans Mono" font-size="16" fill="#c2bbad">%s MATCHES</text><text x="684" y="%d" font-family="DejaVu Sans Mono" font-size="17" fill="%s">%.1f%% WR</text>`, y, index+1, y, row.HeroBuildID, y, formatCardInt(int(row.Matches)), y, accent, row.WinRate)
 		}
@@ -402,7 +386,7 @@ func writeBuildsCard(b *strings.Builder, summary PlayerSummary, accent string, i
 	if len(build.PopularItems) == 0 {
 		writeCardEmpty(b, 1080, 558, "NO ITEMS RETURNED")
 	} else {
-		for index, item := range build.PopularItems[:minCardInt(5, len(build.PopularItems))] {
+		for index, item := range build.PopularItems[:min(5, len(build.PopularItems))] {
 			y := 464 + index*50
 			writeCardArtwork(b, images.dataURI(item.IconURL), 918, y-27, 32, 32)
 			fmt.Fprintf(b, `<text x="876" y="%d" font-family="DejaVu Sans Mono" font-size="15" fill="#a09a8b">#%d</text><text x="964" y="%d" font-family="DejaVu Sans" font-size="16" fill="#e9e1d3">%s</text><text x="1282" y="%d" text-anchor="end" font-family="DejaVu Sans Mono" font-size="15" fill="#bdb7a9">%s</text>`, y, index+1, y, escapeCardSVG(trimCardText(item.Name, 17)), y, formatCardInt(int(item.Builds)))
@@ -424,7 +408,7 @@ func writeSnapshotCard(b *strings.Builder, summary PlayerSummary, accent string,
 	writeSnapshotPanel(b, 481, 354, 397, "CURRENT GAME", snapshotCurrent(summary), accent)
 	writeSnapshotPanel(b, 902, 354, 438, "BUILDS", snapshotBuild(summary), accent)
 	fmt.Fprintf(b, `<text x="90" y="598" font-family="DejaVu Sans" font-size="13" letter-spacing="3" fill="%s">RECENT FORM</text>`, accent)
-	for index, match := range summary.RecentMatches[:minCardInt(3, len(summary.RecentMatches))] {
+	for index, match := range summary.RecentMatches[:min(3, len(summary.RecentMatches))] {
 		writeCompactRecent(b, match, 90+index*414, 646, accent, images.dataURI(match.HeroIconURL))
 	}
 	if len(summary.RecentMatches) == 0 {
@@ -480,7 +464,7 @@ func writeActivePlayers(b *strings.Builder, match *ActiveMatch, x int, y int) {
 		fmt.Fprintf(b, `<text x="%d" y="%d" font-family="DejaVu Sans" font-size="16" fill="#989d9f">No roster returned.</text>`, x, y)
 		return
 	}
-	for index, player := range match.Players[:minCardInt(8, len(match.Players))] {
+	for index, player := range match.Players[:min(8, len(match.Players))] {
 		name := fallbackCardText(player.DisplayName, optionalInt64Card(player.AccountID))
 		hero := activeHeroCard(&player)
 		fmt.Fprintf(b, `<text x="%d" y="%d" font-family="DejaVu Sans" font-size="15" fill="#e6ded1">%s</text><text x="%d" y="%d" font-family="DejaVu Sans" font-size="14" fill="#999d9e">%s</text>`, x, y+index*39, escapeCardSVG(trimCardText(name, 23)), x+252, y+index*39, escapeCardSVG(trimCardText(hero, 20)))
@@ -700,27 +684,6 @@ func fallbackCardText(value string, fallback string) string {
 		return fallback
 	}
 	return strings.TrimSpace(value)
-}
-
-func minCardInt(a int, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func deadlockCardFontPath() string {
-	candidates := []string{
-		"/usr/share/fonts/dejavu/DejaVuSans.ttf",
-		"/System/Library/Fonts/Helvetica.ttc",
-		"/Library/Fonts/Arial Unicode.ttf",
-	}
-	for _, candidate := range candidates {
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
-		}
-	}
-	return ""
 }
 
 func escapeCardSVG(value string) string {

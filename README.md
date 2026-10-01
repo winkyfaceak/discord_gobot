@@ -1,6 +1,6 @@
 # Discord Go Bot
 
-A Docker-ready Discord slash-command bot written in Go, with useful starter
+A Discord slash-command bot written in Go, with useful starter
 commands, weather forecasts, and an interactive Deadlock player statistics
 browser, plus live Valve/Steam server scoreboards.
 
@@ -18,7 +18,7 @@ browser, plus live Valve/Steam server scoreboards.
 - Paginated Deadlock recent matches and per-user interaction ownership.
 - Live Valve server scoreboard sessions rendered as industrial-style cards,
   with automatic refresh, roster paging, and owner-controlled closure.
-- Container-first deployment with Docker Compose support and graceful shutdown.
+- Runs as a NixOS systemd service with graceful shutdown.
 
 ## Commands
 
@@ -87,70 +87,27 @@ that case the card still displays the reported player totals and server status.
 The bot opens outbound Discord/web requests and outbound UDP queries for
 `/server-stats`; it does not listen on a network port.
 
-## Quick Start With Docker Compose
+## Deployment (NixOS home lab)
 
-Set the Discord configuration in your shell:
-
-```sh
-export DISCORD_TOKEN="your_raw_bot_token_here"
-export GUILD_ID="your_test_server_id_here"
-export APP_ID="your_application_id_here"
-```
-
-Start the bot:
-
-```sh
-docker compose up -d --build
-```
-
-Check startup and command registration logs:
-
-```sh
-docker compose logs -f bot
-```
-
-Stop the bot:
-
-```sh
-docker compose down
-```
-
-## Docker Deployment
-
-To run without Compose, build and launch the image directly:
-
-```sh
-docker build -t discord-gobot .
-
-docker run -d \
-  --name discord-gobot \
-  --restart unless-stopped \
-  -e DISCORD_TOKEN="your_raw_bot_token_here" \
-  -e GUILD_ID="your_test_server_id_here" \
-  -e APP_ID="your_application_id_here" \
-  discord-gobot
-```
-
-The runtime image runs the bot as an unprivileged user and includes `curl` for
-weather lookups plus ImageMagick SVG support and fonts for Deadlock statistics
-cards and live server scoreboards.
+The bot runs as the `discord-bot` systemd service, defined in
+`discord-bot.nix` in the [homelab](https://github.com/winkyfaceak/homelab)
+repo. That file has the update and token commands. Runtime needs are
+ImageMagick (with librsvg) and the DejaVu fonts, both provided by the service.
 
 ## Local Development
 
 Requirements:
 
 - Go 1.26 or newer.
-- `curl` to use `/weather`.
-- ImageMagick with the `magick` executable to use interactive Deadlock and live
-  server scoreboard cards.
+- ImageMagick with the `magick` executable and SVG support to use interactive
+  Deadlock and live server scoreboard cards. Card text uses the DejaVu Sans font.
 - Outbound UDP access to the public Source query endpoints used with
   `/server-stats`.
 
 Run the bot locally:
 
-```sh
-export DISCORD_TOKEN="your_raw_bot_token_here"
-export GUILD_ID="your_test_server_id_here"
+```fish
+read -gxs -P 'Discord token: ' DISCORD_TOKEN
 go run .
 ```
 
@@ -171,9 +128,7 @@ go test ./...
 |-- internal/deadlock          # Deadlock API client, summaries, and image cards
 |-- internal/discordutil       # Discord response helpers
 |-- internal/serverstats       # Valve A2S querying and live scoreboard cards
-|-- internal/weather           # wttr.in integration
-|-- Dockerfile
-`-- compose.yaml
+`-- internal/weather           # wttr.in integration
 ```
 
 ## External Services

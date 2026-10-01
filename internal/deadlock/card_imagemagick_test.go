@@ -28,7 +28,7 @@ func TestBuildDashboardSVGIncludesAllViewContentAndEscapesText(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(string(test.view), func(t *testing.T) {
-			svg := BuildDashboardSVG(summary, CardOptions{View: test.view})
+			svg := buildDashboardSVG(summary, CardOptions{View: test.view}, dashboardCardImages{})
 			if !strings.Contains(svg, test.want) {
 				t.Fatalf("BuildDashboardSVG(%q) does not contain %q", test.view, test.want)
 			}
