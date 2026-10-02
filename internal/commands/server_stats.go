@@ -102,7 +102,7 @@ func (c *ServerStats) ComponentPrefix() string {
 	return serverStatsComponentPrefix
 }
 
-func (c *ServerStats) Definition() discord.SlashCommandCreate {
+func (c *ServerStats) Definition() discord.ApplicationCommandCreate {
 	return discord.SlashCommandCreate{
 		Name:        "server-stats",
 		Description: "Open a live scoreboard for a public Valve/Steam Source server.",

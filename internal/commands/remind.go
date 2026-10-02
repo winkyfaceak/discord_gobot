@@ -1,12 +1,8 @@
 package commands
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -59,7 +55,7 @@ func NewRemind(path string) *Remind {
 
 func (r *Remind) ComponentPrefix() string { return "remind" }
 
-func (r *Remind) Definition() discord.SlashCommandCreate {
+func (r *Remind) Definition() discord.ApplicationCommandCreate {
 	return discord.SlashCommandCreate{
 		Name:        "remind",
 		Description: "Ping someone (or yourself) in this channel later",
@@ -277,33 +273,19 @@ func (r *Remind) removeLocked(id string) {
 	}
 }
 
-// saveLocked writes all reminders, replacing the file atomically so a crash
-// mid-write can't corrupt it.
+// saveLocked writes all reminders to disk.
 func (r *Remind) saveLocked() error {
 	list := make([]reminder, 0, len(r.reminders))
 	for _, rem := range r.reminders {
 		list = append(list, rem)
 	}
-	data, err := json.MarshalIndent(list, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(r.path+".tmp", data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(r.path+".tmp", r.path)
+	return saveJSON(r.path, list)
 }
 
 func loadReminders(path string) ([]reminder, error) {
-	data, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
 	var list []reminder
-	return list, json.Unmarshal(data, &list)
+	err := loadJSON(path, &list)
+	return list, err
 }
 
 // timeWords turns "1 hour and 30 minutes" into "1h30m" for time.ParseDuration.

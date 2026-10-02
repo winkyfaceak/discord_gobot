@@ -57,7 +57,7 @@ func New(cfg config.Config, cmds []commands.Command) (*Bot, error) {
 	//
 	// This makes interaction handling simple later
 	for _, cmd := range cmds {
-		name := cmd.Definition().Name
+		name := cmd.Definition().CommandName()
 		if name == "" {
 			return nil, fmt.Errorf("command has empty name")
 		}

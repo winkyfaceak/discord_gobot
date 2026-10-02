@@ -22,7 +22,7 @@ import (
 //  2. Handle()
 //     Runs when the user actually executes the command.
 type Command interface {
-	Definition() discord.SlashCommandCreate
+	Definition() discord.ApplicationCommandCreate
 	Handle(e *events.ApplicationCommandInteractionCreate)
 }
 
@@ -59,12 +59,32 @@ func All(cfg config.Config) []Command {
 		NewServerStats(nil, nil),
 		NewRemind(filepath.Join(cfg.StateDir, "reminders.json")),
 	}
+	cmds = append(cmds, NewTimeZones(filepath.Join(cfg.StateDir, "timezones.json")).Commands()...)
+	cmds = append(cmds, NewCasino(filepath.Join(cfg.StateDir, "casino.json")).Commands()...)
 
 	if cfg.NavidromeUser != "" {
 		cmds = append(cmds, NewMusic(navidrome.New(cfg.NavidromeURL, cfg.NavidromeUser, cfg.NavidromePassword)))
 	}
 
 	return cmds
+}
+
+// funcCommand is a Command made from functions, for groups of commands that
+// share state (the casino, time zones).
+type funcCommand struct {
+	def          discord.ApplicationCommandCreate
+	handle       func(*events.ApplicationCommandInteractionCreate)
+	autocomplete func(*events.AutocompleteInteractionCreate)
+}
+
+func (c funcCommand) Definition() discord.ApplicationCommandCreate { return c.def }
+
+func (c funcCommand) Handle(e *events.ApplicationCommandInteractionCreate) { c.handle(e) }
+
+func (c funcCommand) HandleAutocomplete(e *events.AutocompleteInteractionCreate) {
+	if c.autocomplete != nil {
+		c.autocomplete(e)
+	}
 }
 
 // interactionUserID returns who triggered an interaction, as a string for

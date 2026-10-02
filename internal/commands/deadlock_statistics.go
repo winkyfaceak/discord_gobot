@@ -65,7 +65,7 @@ func (d *DeadlockStatistics) ComponentPrefix() string {
 }
 
 // Definition tells Discord how the slash command should appear.
-func (d *DeadlockStatistics) Definition() discord.SlashCommandCreate {
+func (d *DeadlockStatistics) Definition() discord.ApplicationCommandCreate {
 	return discord.SlashCommandCreate{
 		Name:        "deadlock-statistics",
 		Description: "Interactive Deadlock player statistics, rank, recent games, current game, and builds.",

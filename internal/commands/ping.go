@@ -13,7 +13,7 @@ import (
 type Ping struct{}
 
 // Definition tells Discord how the /ping command should appear
-func (Ping) Definition() discord.SlashCommandCreate {
+func (Ping) Definition() discord.ApplicationCommandCreate {
 	return discord.SlashCommandCreate{
 		Name:        "ping",
 		Description: "Check whether the bot is alive",

@@ -22,7 +22,7 @@ import (
 //	/weather location:Dublin view:full private:true
 type Weather struct{}
 
-func (Weather) Definition() discord.SlashCommandCreate {
+func (Weather) Definition() discord.ApplicationCommandCreate {
 	return discord.SlashCommandCreate{
 		Name:        "weather",
 		Description: "Get weather from wttr.in",

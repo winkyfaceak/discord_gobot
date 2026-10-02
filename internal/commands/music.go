@@ -38,7 +38,7 @@ func NewMusic(nav *navidrome.Client) *Music {
 	return &Music{nav: nav, players: make(map[snowflake.ID]*musicPlayer)}
 }
 
-func (m *Music) Definition() discord.SlashCommandCreate {
+func (m *Music) Definition() discord.ApplicationCommandCreate {
 	return discord.SlashCommandCreate{
 		Name:        "music",
 		Description: "Play music from the home server in your voice channel",
