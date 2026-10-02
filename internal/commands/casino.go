@@ -80,6 +80,7 @@ func (c *Casino) Commands() []Command {
 			handle: c.slots,
 		},
 		c.rouletteCommand(),
+		NewBlackjack(c),
 		funcCommand{
 			def:    discord.SlashCommandCreate{Name: "daily", Description: fmt.Sprintf("Claim %d free coins once a day", dailyCoins), Contexts: guildOnly},
 			handle: c.daily,
@@ -195,10 +196,7 @@ func (c *Casino) balance(e *events.ApplicationCommandInteractionCreate) {
 		who = e.User().ID
 	}
 
-	c.mu.Lock()
-	coins := c.accountLocked(*e.GuildID(), who).Coins
-	c.mu.Unlock()
-	discordutil.Reply(e, fmt.Sprintf("<@%s> has **%s** coins.", who, formatInt(int(coins))), false)
+	discordutil.Reply(e, fmt.Sprintf("<@%s> has **%s** coins.", who, formatInt(int(c.coins(*e.GuildID(), who)))), false)
 }
 
 func (c *Casino) leaderboard(e *events.ApplicationCommandInteractionCreate) {
@@ -230,16 +228,44 @@ func (c *Casino) leaderboard(e *events.ApplicationCommandInteractionCreate) {
 // play takes a bet, runs the game for its payout (0 = lost) and saves the
 // new balance. problem explains why the bet couldn't be placed.
 func (c *Casino) play(guildID, userID snowflake.ID, bet int64, game func() int64) (balance int64, problem string) {
+	if _, problem := c.take(guildID, userID, bet); problem != "" {
+		return 0, problem
+	}
+	return c.give(guildID, userID, game()), ""
+}
+
+// take removes coins for a bet, or explains why it can't.
+func (c *Casino) take(guildID, userID snowflake.ID, amount int64) (balance int64, problem string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	acct := c.accountLocked(guildID, userID)
-	if bet > acct.Coins {
+	if amount > acct.Coins {
 		return acct.Coins, fmt.Sprintf("You only have **%s** coins. `/daily` gives you more.", formatInt(int(acct.Coins)))
 	}
-	acct.Coins += game() - bet
+	acct.Coins -= amount
 	c.saveLocked()
 	return acct.Coins, ""
+}
+
+// give adds coins (winnings or a refund) and returns the new balance.
+func (c *Casino) give(guildID, userID snowflake.ID, amount int64) int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	acct := c.accountLocked(guildID, userID)
+	acct.Coins += amount
+	if amount != 0 {
+		c.saveLocked()
+	}
+	return acct.Coins
+}
+
+// coins is a member's current balance.
+func (c *Casino) coins(guildID, userID snowflake.ID) int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.accountLocked(guildID, userID).Coins
 }
 
 // accountLocked returns a member's account, opening it with starting coins.

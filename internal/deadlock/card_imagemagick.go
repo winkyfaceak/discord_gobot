@@ -1,13 +1,11 @@
 package deadlock
 
 import (
-	"bytes"
 	"context"
+	"discord_gobot/internal/render"
 	"encoding/base64"
-	"encoding/xml"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -49,26 +47,9 @@ func RenderDashboardPNG(ctx context.Context, summary PlayerSummary, options Card
 }
 
 func renderDashboardPNG(ctx context.Context, summary PlayerSummary, options CardOptions, images dashboardCardImages) ([]byte, error) {
-	if _, err := exec.LookPath("magick"); err != nil {
-		return nil, fmt.Errorf("ImageMagick command 'magick' was not found: %w", err)
-	}
-
 	renderImages, cleanup := materializeDashboardCardImages(images)
 	defer cleanup()
-
-	// Fonts come from the SVG font-family via fontconfig
-	cmd := exec.CommandContext(ctx, "magick", "svg:-", "png:-")
-	cmd.Stdin = strings.NewReader(buildDashboardSVG(summary, options, renderImages))
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("ImageMagick Deadlock card render failed: %w: %s", err, strings.TrimSpace(stderr.String()))
-	}
-	return stdout.Bytes(), nil
+	return render.PNG(ctx, buildDashboardSVG(summary, options, renderImages))
 }
 
 func loadDashboardCardImages(ctx context.Context, summary PlayerSummary, options CardOptions, loader *CardAssetLoader) dashboardCardImages {
@@ -226,10 +207,10 @@ func buildDashboardSVG(summary PlayerSummary, options CardOptions, images dashbo
 	fmt.Fprintf(&b, `<rect x="28" y="28" width="10" height="844" fill="%s"/>`, accent)
 	b.WriteString(`<rect x="52" y="52" width="1294" height="132" rx="3" fill="url(#header)" stroke="#31383a"/>`)
 	fmt.Fprintf(&b, `<text x="78" y="86" font-family="DejaVu Sans" font-size="16" letter-spacing="5" fill="%s">DEADLOCK // PLAYER DOSSIER</text>`, accent)
-	fmt.Fprintf(&b, `<text x="78" y="130" font-family="DejaVu Sans" font-size="39" font-weight="700" fill="#eee6d8">%s</text>`, escapeCardSVG(trimCardText(summary.Name, 42)))
+	fmt.Fprintf(&b, `<text x="78" y="130" font-family="DejaVu Sans" font-size="39" font-weight="700" fill="#eee6d8">%s</text>`, render.Escape(trimCardText(summary.Name, 42)))
 	fmt.Fprintf(&b, `<text x="78" y="160" font-family="DejaVu Sans" font-size="17" fill="#979b9c">STEAM ACCOUNT %d  //  %s MATCHES RECORDED</text>`, summary.AccountID, formatCardInt(summary.Matches))
-	fmt.Fprintf(&b, `<rect x="1050" y="82" width="250" height="56" rx="3" fill="%s"/><text x="1175" y="118" text-anchor="middle" font-family="DejaVu Sans" font-size="19" letter-spacing="2" font-weight="700" fill="#f8f3e9">%s</text>`, accent, escapeCardSVG(title))
-	fmt.Fprintf(&b, `<text x="1175" y="163" text-anchor="middle" font-family="DejaVu Sans" font-size="14" letter-spacing="1" fill="#c9bdab">%s</text>`, escapeCardSVG(status))
+	fmt.Fprintf(&b, `<rect x="1050" y="82" width="250" height="56" rx="3" fill="%s"/><text x="1175" y="118" text-anchor="middle" font-family="DejaVu Sans" font-size="19" letter-spacing="2" font-weight="700" fill="#f8f3e9">%s</text>`, accent, render.Escape(title))
+	fmt.Fprintf(&b, `<text x="1175" y="163" text-anchor="middle" font-family="DejaVu Sans" font-size="14" letter-spacing="1" fill="#c9bdab">%s</text>`, render.Escape(status))
 
 	switch view {
 	case CardViewRank:
@@ -261,7 +242,7 @@ func writeOverviewCard(b *strings.Builder, summary PlayerSummary, accent string,
 	topHero := fallbackCardText(summary.TopHeroName, fmt.Sprintf("Hero %d", summary.TopHeroID))
 	b.WriteString(`<rect x="60" y="344" width="430" height="426" rx="4" fill="#151a1d" stroke="#303739"/>`)
 	fmt.Fprintf(b, `<text x="86" y="382" font-family="DejaVu Sans" font-size="13" letter-spacing="3" fill="%s">SIGNATURE HERO</text>`, accent)
-	fmt.Fprintf(b, `<text x="86" y="438" font-family="DejaVu Sans" font-size="32" font-weight="700" fill="#ebe3d4">%s</text>`, escapeCardSVG(trimCardText(topHero, 13)))
+	fmt.Fprintf(b, `<text x="86" y="438" font-family="DejaVu Sans" font-size="32" font-weight="700" fill="#ebe3d4">%s</text>`, render.Escape(trimCardText(topHero, 13)))
 	fmt.Fprintf(b, `<text x="86" y="472" font-family="DejaVu Sans" font-size="15" fill="#9c9f9d">HERO ID %d</text>`, summary.TopHeroID)
 	writeCardArtwork(b, images.dataURI(summary.TopHeroIconURL), 318, 382, 142, 116)
 	writeMiniMetric(b, 86, 526, "MATCHES", formatCardInt(summary.TopHeroMatches), accent)
@@ -285,11 +266,11 @@ func writeRankCard(b *strings.Builder, summary PlayerSummary, accent string, ima
 	fmt.Fprintf(b, `<text x="92" y="264" font-family="DejaVu Sans" font-size="14" letter-spacing="4" fill="%s">PREDICTED RANK</text>`, accent)
 	if summary.RankError != "" {
 		writeCardEmpty(b, 375, 448, "RANK DATA UNAVAILABLE")
-		fmt.Fprintf(b, `<text x="375" y="486" text-anchor="middle" font-family="DejaVu Sans" font-size="15" fill="#9b9f9f">%s</text>`, escapeCardSVG(trimCardText(summary.RankError, 54)))
+		fmt.Fprintf(b, `<text x="375" y="486" text-anchor="middle" font-family="DejaVu Sans" font-size="15" fill="#9b9f9f">%s</text>`, render.Escape(trimCardText(summary.RankError, 54)))
 	} else if summary.Rank == nil {
 		writeCardEmpty(b, 375, 448, "RANK WAS NOT REQUESTED")
 	} else {
-		fmt.Fprintf(b, `<text x="92" y="354" font-family="DejaVu Sans" font-size="48" font-weight="700" fill="#eee6d8">%s</text>`, escapeCardSVG(trimCardText(summary.Rank.DisplayName(), 14)))
+		fmt.Fprintf(b, `<text x="92" y="354" font-family="DejaVu Sans" font-size="48" font-weight="700" fill="#eee6d8">%s</text>`, render.Escape(trimCardText(summary.Rank.DisplayName(), 14)))
 		fmt.Fprintf(b, `<text x="92" y="394" font-family="DejaVu Sans" font-size="16" fill="#959a9c">BADGE CODE %d</text>`, summary.Rank.Badge)
 		if useRankImage {
 			writeCardArtwork(b, images.dataURI(summary.Rank.ImageURL), 474, 298, 160, 160)
@@ -327,7 +308,7 @@ func writeCurrentCard(b *strings.Builder, summary PlayerSummary, accent string, 
 	fmt.Fprintf(b, `<text x="90" y="258" font-family="DejaVu Sans" font-size="14" letter-spacing="4" fill="%s">ACTIVE MATCH WATCH</text>`, accent)
 	if summary.CurrentGameError != "" {
 		writeCardEmpty(b, 700, 470, "CURRENT GAME UNAVAILABLE")
-		fmt.Fprintf(b, `<text x="700" y="510" text-anchor="middle" font-family="DejaVu Sans" font-size="15" fill="#9b9f9f">%s</text>`, escapeCardSVG(trimCardText(summary.CurrentGameError, 90)))
+		fmt.Fprintf(b, `<text x="700" y="510" text-anchor="middle" font-family="DejaVu Sans" font-size="15" fill="#9b9f9f">%s</text>`, render.Escape(trimCardText(summary.CurrentGameError, 90)))
 		return
 	}
 	if summary.CurrentGame == nil {
@@ -363,7 +344,7 @@ func writeBuildsCard(b *strings.Builder, summary PlayerSummary, accent string, i
 	fmt.Fprintf(b, `<text x="90" y="258" font-family="DejaVu Sans" font-size="14" letter-spacing="4" fill="%s">BUILDS AND ITEMS</text>`, accent)
 	if summary.BuildError != "" {
 		writeCardEmpty(b, 700, 466, "BUILD DATA UNAVAILABLE")
-		fmt.Fprintf(b, `<text x="700" y="508" text-anchor="middle" font-family="DejaVu Sans" font-size="15" fill="#9b9f9f">%s</text>`, escapeCardSVG(trimCardText(summary.BuildError, 90)))
+		fmt.Fprintf(b, `<text x="700" y="508" text-anchor="middle" font-family="DejaVu Sans" font-size="15" fill="#9b9f9f">%s</text>`, render.Escape(trimCardText(summary.BuildError, 90)))
 		return
 	}
 	if summary.Build == nil {
@@ -371,7 +352,7 @@ func writeBuildsCard(b *strings.Builder, summary PlayerSummary, accent string, i
 		return
 	}
 	build := summary.Build
-	fmt.Fprintf(b, `<text x="90" y="310" font-family="DejaVu Sans" font-size="31" font-weight="700" fill="#ece3d4">%s</text><text x="90" y="342" font-family="DejaVu Sans" font-size="14" fill="#959a9c">HERO ID %d  //  %s</text>`, escapeCardSVG(trimCardText(build.HeroName, 26)), build.HeroID, escapeCardSVG(trimCardText(build.BuildsSourceNote, 48)))
+	fmt.Fprintf(b, `<text x="90" y="310" font-family="DejaVu Sans" font-size="31" font-weight="700" fill="#ece3d4">%s</text><text x="90" y="342" font-family="DejaVu Sans" font-size="14" fill="#959a9c">HERO ID %d  //  %s</text>`, render.Escape(trimCardText(build.HeroName, 26)), build.HeroID, render.Escape(trimCardText(build.BuildsSourceNote, 48)))
 	writeCardArtwork(b, images.dataURI(build.HeroIconURL), 752, 272, 70, 70)
 	b.WriteString(`<rect x="90" y="376" width="735" height="352" fill="#111619" stroke="#2d3436"/><rect x="850" y="376" width="460" height="352" fill="#111619" stroke="#2d3436"/>`)
 	fmt.Fprintf(b, `<text x="116" y="414" font-family="DejaVu Sans" font-size="13" letter-spacing="3" fill="%s">TOP BUILDS</text><text x="876" y="414" font-family="DejaVu Sans" font-size="13" letter-spacing="3" fill="%s">POPULAR ITEMS</text>`, accent, accent)
@@ -389,7 +370,7 @@ func writeBuildsCard(b *strings.Builder, summary PlayerSummary, accent string, i
 		for index, item := range build.PopularItems[:min(5, len(build.PopularItems))] {
 			y := 464 + index*50
 			writeCardArtwork(b, images.dataURI(item.IconURL), 918, y-27, 32, 32)
-			fmt.Fprintf(b, `<text x="876" y="%d" font-family="DejaVu Sans Mono" font-size="15" fill="#a09a8b">#%d</text><text x="964" y="%d" font-family="DejaVu Sans" font-size="16" fill="#e9e1d3">%s</text><text x="1282" y="%d" text-anchor="end" font-family="DejaVu Sans Mono" font-size="15" fill="#bdb7a9">%s</text>`, y, index+1, y, escapeCardSVG(trimCardText(item.Name, 17)), y, formatCardInt(int(item.Builds)))
+			fmt.Fprintf(b, `<text x="876" y="%d" font-family="DejaVu Sans Mono" font-size="15" fill="#a09a8b">#%d</text><text x="964" y="%d" font-family="DejaVu Sans" font-size="16" fill="#e9e1d3">%s</text><text x="1282" y="%d" text-anchor="end" font-family="DejaVu Sans Mono" font-size="15" fill="#bdb7a9">%s</text>`, y, index+1, y, render.Escape(trimCardText(item.Name, 17)), y, formatCardInt(int(item.Builds)))
 		}
 	}
 }
@@ -417,15 +398,15 @@ func writeSnapshotCard(b *strings.Builder, summary PlayerSummary, accent string,
 }
 
 func writeMetricCard(b *strings.Builder, x int, y int, label string, value string, accent string) {
-	fmt.Fprintf(b, `<rect x="%d" y="%d" width="246" height="100" rx="3" fill="#252b2e" stroke="#343a3c"/><text x="%d" y="%d" font-family="DejaVu Sans" font-size="12" letter-spacing="2" fill="%s">%s</text><text x="%d" y="%d" font-family="DejaVu Sans" font-size="23" font-weight="700" fill="#ece4d6">%s</text>`, x, y, x+16, y+28, accent, escapeCardSVG(label), x+16, y+66, escapeCardSVG(trimCardText(value, 18)))
+	fmt.Fprintf(b, `<rect x="%d" y="%d" width="246" height="100" rx="3" fill="#252b2e" stroke="#343a3c"/><text x="%d" y="%d" font-family="DejaVu Sans" font-size="12" letter-spacing="2" fill="%s">%s</text><text x="%d" y="%d" font-family="DejaVu Sans" font-size="23" font-weight="700" fill="#ece4d6">%s</text>`, x, y, x+16, y+28, accent, render.Escape(label), x+16, y+66, render.Escape(trimCardText(value, 18)))
 }
 
 func writeMiniMetric(b *strings.Builder, x int, y int, label string, value string, accent string) {
-	fmt.Fprintf(b, `<text x="%d" y="%d" font-family="DejaVu Sans" font-size="12" letter-spacing="2" fill="%s">%s</text><text x="%d" y="%d" font-family="DejaVu Sans" font-size="29" font-weight="700" fill="#ece4d6">%s</text>`, x, y, accent, escapeCardSVG(label), x, y+42, escapeCardSVG(trimCardText(value, 14)))
+	fmt.Fprintf(b, `<text x="%d" y="%d" font-family="DejaVu Sans" font-size="12" letter-spacing="2" fill="%s">%s</text><text x="%d" y="%d" font-family="DejaVu Sans" font-size="29" font-weight="700" fill="#ece4d6">%s</text>`, x, y, accent, render.Escape(label), x, y+42, render.Escape(trimCardText(value, 14)))
 }
 
 func writeWideMetric(b *strings.Builder, x int, y int, label string, value string, accent string) {
-	fmt.Fprintf(b, `<rect x="%d" y="%d" width="534" height="82" rx="3" fill="#202629"/><text x="%d" y="%d" font-family="DejaVu Sans" font-size="12" letter-spacing="2" fill="%s">%s</text><text x="%d" y="%d" font-family="DejaVu Sans" font-size="24" font-weight="700" fill="#ece4d6">%s</text>`, x, y, x+20, y+26, accent, escapeCardSVG(label), x+20, y+59, escapeCardSVG(trimCardText(value, 30)))
+	fmt.Fprintf(b, `<rect x="%d" y="%d" width="534" height="82" rx="3" fill="#202629"/><text x="%d" y="%d" font-family="DejaVu Sans" font-size="12" letter-spacing="2" fill="%s">%s</text><text x="%d" y="%d" font-family="DejaVu Sans" font-size="24" font-weight="700" fill="#ece4d6">%s</text>`, x, y, x+20, y+26, accent, render.Escape(label), x+20, y+59, render.Escape(trimCardText(value, 30)))
 }
 
 func writeRecentRow(b *strings.Builder, match RecentMatch, index int, x int, y int, width int, accent string, heroImage string) {
@@ -439,7 +420,7 @@ func writeRecentRow(b *strings.Builder, match RecentMatch, index int, x int, y i
 	}
 	fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="62" rx="3" fill="%s"/><rect x="%d" y="%d" width="78" height="62" fill="%s"/><text x="%d" y="%d" text-anchor="middle" font-family="DejaVu Sans" font-size="14" font-weight="700" fill="#f4eee2">%s</text>`, x, y, width, fill, x, y, color, x+39, y+36, result)
 	writeCardArtwork(b, heroImage, x+94, y+11, 40, 40)
-	fmt.Fprintf(b, `<text x="%d" y="%d" font-family="DejaVu Sans" font-size="19" font-weight="700" fill="#eee7d9">%s</text><text x="%d" y="%d" font-family="DejaVu Sans Mono" font-size="16" fill="#aaa496">%d / %d / %d  //  %s SOULS</text>`, x+146, y+27, escapeCardSVG(trimCardText(fallbackCardText(match.HeroName, fmt.Sprintf("Hero %d", match.HeroID)), 20)), x+146, y+50, match.Kills, match.Deaths, match.Assists, formatCardInt(int(match.NetWorth)))
+	fmt.Fprintf(b, `<text x="%d" y="%d" font-family="DejaVu Sans" font-size="19" font-weight="700" fill="#eee7d9">%s</text><text x="%d" y="%d" font-family="DejaVu Sans Mono" font-size="16" fill="#aaa496">%d / %d / %d  //  %s SOULS</text>`, x+146, y+27, render.Escape(trimCardText(fallbackCardText(match.HeroName, fmt.Sprintf("Hero %d", match.HeroID)), 20)), x+146, y+50, match.Kills, match.Deaths, match.Assists, formatCardInt(int(match.NetWorth)))
 }
 
 func writeRecentTableRow(b *strings.Builder, match RecentMatch, x int, y int, shaded bool, accent string, heroImage string) {
@@ -452,11 +433,11 @@ func writeRecentTableRow(b *strings.Builder, match RecentMatch, x int, y int, sh
 	}
 	fmt.Fprintf(b, `<text x="%d" y="%d" font-family="DejaVu Sans" font-size="17" font-weight="700" fill="%s">%s</text>`, x, y, color, result)
 	writeCardArtwork(b, heroImage, 248, y-28, 40, 40)
-	fmt.Fprintf(b, `<text x="300" y="%d" font-family="DejaVu Sans" font-size="18" fill="#ece4d6">%s</text><text x="668" y="%d" font-family="DejaVu Sans Mono" font-size="17" fill="#c7c0b2">%d / %d / %d</text><text x="885" y="%d" font-family="DejaVu Sans Mono" font-size="17" fill="#c7c0b2">%s</text><text x="1064" y="%d" font-family="DejaVu Sans Mono" font-size="17" fill="#c7c0b2">%dm</text><text x="1220" y="%d" font-family="DejaVu Sans Mono" font-size="16" fill="%s">%d</text>`, y, escapeCardSVG(trimCardText(fallbackCardText(match.HeroName, fmt.Sprintf("Hero %d", match.HeroID)), 23)), y, match.Kills, match.Deaths, match.Assists, y, formatCardInt(int(match.NetWorth)), y, match.DurationMins, y, accent, match.MatchID)
+	fmt.Fprintf(b, `<text x="300" y="%d" font-family="DejaVu Sans" font-size="18" fill="#ece4d6">%s</text><text x="668" y="%d" font-family="DejaVu Sans Mono" font-size="17" fill="#c7c0b2">%d / %d / %d</text><text x="885" y="%d" font-family="DejaVu Sans Mono" font-size="17" fill="#c7c0b2">%s</text><text x="1064" y="%d" font-family="DejaVu Sans Mono" font-size="17" fill="#c7c0b2">%dm</text><text x="1220" y="%d" font-family="DejaVu Sans Mono" font-size="16" fill="%s">%d</text>`, y, render.Escape(trimCardText(fallbackCardText(match.HeroName, fmt.Sprintf("Hero %d", match.HeroID)), 23)), y, match.Kills, match.Deaths, match.Assists, y, formatCardInt(int(match.NetWorth)), y, match.DurationMins, y, accent, match.MatchID)
 }
 
 func writeCurrentMetric(b *strings.Builder, x int, y int, label string, value string, accent string) {
-	fmt.Fprintf(b, `<text x="%d" y="%d" font-family="DejaVu Sans" font-size="12" letter-spacing="2" fill="%s">%s</text><text x="%d" y="%d" font-family="DejaVu Sans" font-size="24" font-weight="700" fill="#ece4d6">%s</text>`, x, y, accent, escapeCardSVG(label), x, y+38, escapeCardSVG(trimCardText(value, 22)))
+	fmt.Fprintf(b, `<text x="%d" y="%d" font-family="DejaVu Sans" font-size="12" letter-spacing="2" fill="%s">%s</text><text x="%d" y="%d" font-family="DejaVu Sans" font-size="24" font-weight="700" fill="#ece4d6">%s</text>`, x, y, accent, render.Escape(label), x, y+38, render.Escape(trimCardText(value, 22)))
 }
 
 func writeActivePlayers(b *strings.Builder, match *ActiveMatch, x int, y int) {
@@ -467,12 +448,12 @@ func writeActivePlayers(b *strings.Builder, match *ActiveMatch, x int, y int) {
 	for index, player := range match.Players[:min(8, len(match.Players))] {
 		name := fallbackCardText(player.DisplayName, optionalInt64Card(player.AccountID))
 		hero := activeHeroCard(&player)
-		fmt.Fprintf(b, `<text x="%d" y="%d" font-family="DejaVu Sans" font-size="15" fill="#e6ded1">%s</text><text x="%d" y="%d" font-family="DejaVu Sans" font-size="14" fill="#999d9e">%s</text>`, x, y+index*39, escapeCardSVG(trimCardText(name, 23)), x+252, y+index*39, escapeCardSVG(trimCardText(hero, 20)))
+		fmt.Fprintf(b, `<text x="%d" y="%d" font-family="DejaVu Sans" font-size="15" fill="#e6ded1">%s</text><text x="%d" y="%d" font-family="DejaVu Sans" font-size="14" fill="#999d9e">%s</text>`, x, y+index*39, render.Escape(trimCardText(name, 23)), x+252, y+index*39, render.Escape(trimCardText(hero, 20)))
 	}
 }
 
 func writeSnapshotPanel(b *strings.Builder, x int, y int, width int, title string, value string, accent string) {
-	fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="200" rx="3" fill="#151a1d" stroke="#303739"/><text x="%d" y="%d" font-family="DejaVu Sans" font-size="13" letter-spacing="3" fill="%s">%s</text><text x="%d" y="%d" font-family="DejaVu Sans" font-size="20" font-weight="700" fill="#e9e1d3">%s</text>`, x, y, width, x+25, y+39, accent, escapeCardSVG(title), x+25, y+89, escapeCardSVG(trimCardText(value, 29)))
+	fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="200" rx="3" fill="#151a1d" stroke="#303739"/><text x="%d" y="%d" font-family="DejaVu Sans" font-size="13" letter-spacing="3" fill="%s">%s</text><text x="%d" y="%d" font-family="DejaVu Sans" font-size="20" font-weight="700" fill="#e9e1d3">%s</text>`, x, y, width, x+25, y+39, accent, render.Escape(title), x+25, y+89, render.Escape(trimCardText(value, 29)))
 }
 
 func writeCompactRecent(b *strings.Builder, match RecentMatch, x int, y int, accent string, heroImage string) {
@@ -482,18 +463,18 @@ func writeCompactRecent(b *strings.Builder, match RecentMatch, x int, y int, acc
 	}
 	fmt.Fprintf(b, `<rect x="%d" y="%d" width="390" height="96" rx="3" fill="#151a1d" stroke="#303739"/><text x="%d" y="%d" font-family="DejaVu Sans" font-size="14" font-weight="700" fill="%s">%s</text>`, x, y, x+20, y+34, color, result)
 	writeCardArtwork(b, heroImage, x+78, y+12, 38, 38)
-	fmt.Fprintf(b, `<text x="%d" y="%d" font-family="DejaVu Sans" font-size="18" fill="#ece4d6">%s</text><text x="%d" y="%d" font-family="DejaVu Sans Mono" font-size="14" fill="%s">%d/%d/%d  //  %s SOULS</text>`, x+126, y+34, escapeCardSVG(trimCardText(fallbackCardText(match.HeroName, fmt.Sprintf("Hero %d", match.HeroID)), 15)), x+20, y+70, accent, match.Kills, match.Deaths, match.Assists, formatCardInt(int(match.NetWorth)))
+	fmt.Fprintf(b, `<text x="%d" y="%d" font-family="DejaVu Sans" font-size="18" fill="#ece4d6">%s</text><text x="%d" y="%d" font-family="DejaVu Sans Mono" font-size="14" fill="%s">%d/%d/%d  //  %s SOULS</text>`, x+126, y+34, render.Escape(trimCardText(fallbackCardText(match.HeroName, fmt.Sprintf("Hero %d", match.HeroID)), 15)), x+20, y+70, accent, match.Kills, match.Deaths, match.Assists, formatCardInt(int(match.NetWorth)))
 }
 
 func writeCardArtwork(b *strings.Builder, dataURI string, x int, y int, width int, height int) {
 	if dataURI == "" {
 		return
 	}
-	fmt.Fprintf(b, `<image xlink:href="%s" x="%d" y="%d" width="%d" height="%d" preserveAspectRatio="xMidYMid meet"/>`, escapeCardSVG(dataURI), x, y, width, height)
+	fmt.Fprintf(b, `<image xlink:href="%s" x="%d" y="%d" width="%d" height="%d" preserveAspectRatio="xMidYMid meet"/>`, render.Escape(dataURI), x, y, width, height)
 }
 
 func writeCardEmpty(b *strings.Builder, x int, y int, message string) {
-	fmt.Fprintf(b, `<text x="%d" y="%d" text-anchor="middle" font-family="DejaVu Sans" font-size="24" letter-spacing="3" fill="#bdb4a5">%s</text>`, x, y, escapeCardSVG(message))
+	fmt.Fprintf(b, `<text x="%d" y="%d" text-anchor="middle" font-family="DejaVu Sans" font-size="24" letter-spacing="3" fill="#bdb4a5">%s</text>`, x, y, render.Escape(message))
 }
 
 func snapshotRank(summary PlayerSummary) string {
@@ -684,10 +665,4 @@ func fallbackCardText(value string, fallback string) string {
 		return fallback
 	}
 	return strings.TrimSpace(value)
-}
-
-func escapeCardSVG(value string) string {
-	var b bytes.Buffer
-	_ = xml.EscapeText(&b, []byte(value))
-	return b.String()
 }

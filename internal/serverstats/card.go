@@ -1,11 +1,9 @@
 package serverstats
 
 import (
-	"bytes"
 	"context"
-	"encoding/xml"
+	"discord_gobot/internal/render"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -46,23 +44,7 @@ func (ImageMagickRenderer) RenderPNG(ctx context.Context, view CardView) ([]byte
 
 // RenderCardPNG renders a Valve-industrial server scoreboard PNG.
 func RenderCardPNG(ctx context.Context, view CardView) ([]byte, error) {
-	if _, err := exec.LookPath("magick"); err != nil {
-		return nil, fmt.Errorf("ImageMagick command 'magick' was not found: %w", err)
-	}
-
-	// Fonts come from the SVG font-family via fontconfig
-	cmd := exec.CommandContext(ctx, "magick", "svg:-", "png:-")
-	cmd.Stdin = strings.NewReader(BuildCardSVG(view))
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("ImageMagick server scoreboard render failed: %w: %s", err, strings.TrimSpace(stderr.String()))
-	}
-	return stdout.Bytes(), nil
+	return render.PNG(ctx, BuildCardSVG(view))
 }
 
 // BuildCardSVG creates the SVG backing the Discord scoreboard image.
@@ -104,11 +86,11 @@ func BuildCardSVG(view CardView) string {
 	b.WriteString(`<rect width="1400" height="900" fill="url(#background)"/><rect x="28" y="28" width="1344" height="844" rx="6" fill="#202325" stroke="#3a3d40" stroke-width="2"/>`)
 	b.WriteString(`<rect x="28" y="28" width="10" height="844" fill="#d46a23"/><rect x="52" y="52" width="1294" height="132" rx="3" fill="url(#header)" stroke="#333638"/>`)
 	fmt.Fprintf(&b, `<text x="78" y="86" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" letter-spacing="5" fill="#d46a23">VALVE SERVER MONITOR</text>`)
-	fmt.Fprintf(&b, `<text x="78" y="128" font-family="DejaVu Sans, Arial, sans-serif" font-size="36" font-weight="700" fill="#f2f0ea">%s</text>`, escapeSVG(trimText(serverName, 54)))
-	fmt.Fprintf(&b, `<text x="78" y="160" font-family="DejaVu Sans, Arial, sans-serif" font-size="18" fill="#a7aaab">%s  //  %s</text>`, escapeSVG(trimText(gameName, 34)), escapeSVG(view.Endpoint.Address))
-	fmt.Fprintf(&b, `<rect x="1080" y="84" width="222" height="54" rx="3" fill="%s"/><text x="1191" y="119" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="21" font-weight="700" fill="#f8f5ef">%s</text>`, statusColor, escapeSVG(statusText))
+	fmt.Fprintf(&b, `<text x="78" y="128" font-family="DejaVu Sans, Arial, sans-serif" font-size="36" font-weight="700" fill="#f2f0ea">%s</text>`, render.Escape(trimText(serverName, 54)))
+	fmt.Fprintf(&b, `<text x="78" y="160" font-family="DejaVu Sans, Arial, sans-serif" font-size="18" fill="#a7aaab">%s  //  %s</text>`, render.Escape(trimText(gameName, 34)), render.Escape(view.Endpoint.Address))
+	fmt.Fprintf(&b, `<rect x="1080" y="84" width="222" height="54" rx="3" fill="%s"/><text x="1191" y="119" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="21" font-weight="700" fill="#f8f5ef">%s</text>`, statusColor, render.Escape(statusText))
 	if view.Status == StatusStale && snapshot != nil {
-		fmt.Fprintf(&b, `<text x="1191" y="163" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="13" letter-spacing="1" fill="#c87539">LAST GOOD %s - RETRYING</text>`, escapeSVG(formatCardTime(snapshot.FetchedAt)))
+		fmt.Fprintf(&b, `<text x="1191" y="163" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="13" letter-spacing="1" fill="#c87539">LAST GOOD %s - RETRYING</text>`, render.Escape(formatCardTime(snapshot.FetchedAt)))
 	}
 
 	writeMetric(&b, 60, "MAP", mapName)
@@ -130,13 +112,13 @@ func BuildCardSVG(view CardView) string {
 	}
 	lastRefresh := formatCardTime(view.LastAttempt)
 	expiry := formatCardTime(view.ExpiresAt)
-	fmt.Fprintf(&b, `<text x="78" y="826" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" letter-spacing="2" fill="#d46a23">%s</text>`, escapeSVG(pageText))
-	fmt.Fprintf(&b, `<text x="690" y="826" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" fill="#979a9c">LAST QUERY  %s</text>`, escapeSVG(lastRefresh))
-	fmt.Fprintf(&b, `<text x="1322" y="826" text-anchor="end" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" fill="#979a9c">SESSION ENDS  %s</text>`, escapeSVG(expiry))
+	fmt.Fprintf(&b, `<text x="78" y="826" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" letter-spacing="2" fill="#d46a23">%s</text>`, render.Escape(pageText))
+	fmt.Fprintf(&b, `<text x="690" y="826" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" fill="#979a9c">LAST QUERY  %s</text>`, render.Escape(lastRefresh))
+	fmt.Fprintf(&b, `<text x="1322" y="826" text-anchor="end" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" fill="#979a9c">SESSION ENDS  %s</text>`, render.Escape(expiry))
 
 	if isTerminalStatus(view.Status) {
 		b.WriteString(`<rect x="52" y="52" width="1294" height="720" fill="#111314" opacity="0.48"/>`)
-		fmt.Fprintf(&b, `<rect x="440" y="396" width="520" height="94" rx="4" fill="#202325" stroke="%s" stroke-width="3"/><text x="700" y="453" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="28" letter-spacing="3" font-weight="700" fill="#f2f0ea">%s</text>`, statusColor, escapeSVG(statusText))
+		fmt.Fprintf(&b, `<rect x="440" y="396" width="520" height="94" rx="4" fill="#202325" stroke="%s" stroke-width="3"/><text x="700" y="453" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="28" letter-spacing="3" font-weight="700" fill="#f2f0ea">%s</text>`, statusColor, render.Escape(statusText))
 	}
 
 	b.WriteString(`</svg>`)
@@ -144,7 +126,7 @@ func BuildCardSVG(view CardView) string {
 }
 
 func writeMetric(b *strings.Builder, x int, label string, value string) {
-	fmt.Fprintf(b, `<rect x="%d" y="204" width="192" height="66" rx="3" fill="#292c2e" stroke="#35393b"/><text x="%d" y="228" font-family="DejaVu Sans, Arial, sans-serif" font-size="12" letter-spacing="2" fill="#9b9e9f">%s</text><text x="%d" y="256" font-family="DejaVu Sans, Arial, sans-serif" font-size="20" font-weight="700" fill="#ece9e3">%s</text>`, x, x+16, escapeSVG(label), x+16, escapeSVG(trimText(value, 18)))
+	fmt.Fprintf(b, `<rect x="%d" y="204" width="192" height="66" rx="3" fill="#292c2e" stroke="#35393b"/><text x="%d" y="228" font-family="DejaVu Sans, Arial, sans-serif" font-size="12" letter-spacing="2" fill="#9b9e9f">%s</text><text x="%d" y="256" font-family="DejaVu Sans, Arial, sans-serif" font-size="20" font-weight="700" fill="#ece9e3">%s</text>`, x, x+16, render.Escape(label), x+16, render.Escape(trimText(value, 18)))
 }
 
 func writeRoster(b *strings.Builder, snapshot *Snapshot, page int, detail string) {
@@ -174,15 +156,15 @@ func writeRoster(b *strings.Builder, snapshot *Snapshot, page int, detail string
 		}
 		number := page*RowsPerPage + index + 1
 		fmt.Fprintf(b, `<text x="90" y="%d" font-family="DejaVu Sans Mono, monospace" font-size="17" fill="#8e9293">%02d</text>`, y, number)
-		fmt.Fprintf(b, `<text x="152" y="%d" font-family="DejaVu Sans, Arial, sans-serif" font-size="18" fill="#f0ede8">%s</text>`, y, escapeSVG(trimText(fallback(player.Name, "Unnamed Player"), 56)))
+		fmt.Fprintf(b, `<text x="152" y="%d" font-family="DejaVu Sans, Arial, sans-serif" font-size="18" fill="#f0ede8">%s</text>`, y, render.Escape(trimText(fallback(player.Name, "Unnamed Player"), 56)))
 		fmt.Fprintf(b, `<text x="1130" y="%d" text-anchor="end" font-family="DejaVu Sans Mono, monospace" font-size="18" fill="#e2dfd9">%d</text>`, y, player.Score)
-		fmt.Fprintf(b, `<text x="1296" y="%d" text-anchor="end" font-family="DejaVu Sans Mono, monospace" font-size="18" fill="#b2b5b6">%s</text>`, y, escapeSVG(formatDuration(player.Connected)))
+		fmt.Fprintf(b, `<text x="1296" y="%d" text-anchor="end" font-family="DejaVu Sans Mono, monospace" font-size="18" fill="#b2b5b6">%s</text>`, y, render.Escape(formatDuration(player.Connected)))
 	}
 }
 
 func writeEmptyRoster(b *strings.Builder, heading string, detail string) {
-	fmt.Fprintf(b, `<text x="700" y="486" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="28" letter-spacing="3" fill="#e7e4dd">%s</text>`, escapeSVG(heading))
-	fmt.Fprintf(b, `<text x="700" y="526" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" fill="#989c9e">%s</text>`, escapeSVG(trimText(detail, 106)))
+	fmt.Fprintf(b, `<text x="700" y="486" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="28" letter-spacing="3" fill="#e7e4dd">%s</text>`, render.Escape(heading))
+	fmt.Fprintf(b, `<text x="700" y="526" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="17" fill="#989c9e">%s</text>`, render.Escape(trimText(detail, 106)))
 }
 
 func statusAccent(status CardStatus) string {
@@ -247,10 +229,4 @@ func yesNo(value bool) string {
 		return "YES"
 	}
 	return "NO"
-}
-
-func escapeSVG(value string) string {
-	var b bytes.Buffer
-	_ = xml.EscapeText(&b, []byte(value))
-	return b.String()
 }

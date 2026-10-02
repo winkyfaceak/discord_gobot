@@ -5,6 +5,7 @@ package roulette
 import (
 	"bytes"
 	"context"
+	"discord_gobot/internal/render"
 	"fmt"
 	"image"
 	"image/color"
@@ -12,7 +13,6 @@ import (
 	"image/gif"
 	"image/png"
 	"math"
-	"os/exec"
 	"slices"
 	"strings"
 	"sync"
@@ -93,7 +93,7 @@ func RenderSpin(ctx context.Context, result int) (gifData []byte, still []byte, 
 		return nil, nil, err
 	}
 
-	still, err = magick(ctx, FrameSVG(result, frames-1, true), "svg:-", "png:-")
+	still, err = render.PNG(ctx, FrameSVG(result, frames-1, true))
 	return out.Bytes(), still, err
 }
 
@@ -117,7 +117,7 @@ func cachedWheel(ctx context.Context) (*wheelImage, error) {
 		return wheelCache, nil
 	}
 
-	pngData, err := magick(ctx, wheelSVG(0, -1), "svg:-", "png:-")
+	pngData, err := render.PNG(ctx, wheelSVG(0, -1))
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +129,7 @@ func cachedWheel(ctx context.Context) (*wheelImage, error) {
 	draw.Draw(img, img.Bounds(), decoded, image.Point{}, draw.Src)
 
 	// Let ImageMagick pick the wheel's 248 best colours, then add the ball's
-	gifData, err := magick(ctx, wheelSVG(0, -1), "svg:-", "-colors", "248", "gif:-")
+	gifData, err := render.Magick(ctx, wheelSVG(0, -1), "svg:-", "-colors", "248", "gif:-")
 	if err != nil {
 		return nil, err
 	}
@@ -220,17 +220,6 @@ func disc(img *image.RGBA, cx, cy, r float64, fill, edge color.RGBA) {
 			img.SetRGBA(x, y, color.RGBA{blend(paint.R, under.R), blend(paint.G, under.G), blend(paint.B, under.B), 0xff})
 		}
 	}
-}
-
-func magick(ctx context.Context, stdin string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "magick", args...)
-	cmd.Stdin = strings.NewReader(stdin)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("ImageMagick roulette render failed: %w: %s", err, strings.TrimSpace(stderr.String()))
-	}
-	return stdout.Bytes(), nil
 }
 
 // Positions returns the wheel's rotation and the ball's angle and distance
