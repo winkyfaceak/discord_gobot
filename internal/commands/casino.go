@@ -79,6 +79,7 @@ func (c *Casino) Commands() []Command {
 			},
 			handle: c.slots,
 		},
+		c.rouletteCommand(),
 		funcCommand{
 			def:    discord.SlashCommandCreate{Name: "daily", Description: fmt.Sprintf("Claim %d free coins once a day", dailyCoins), Contexts: guildOnly},
 			handle: c.daily,

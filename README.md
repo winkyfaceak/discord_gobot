@@ -36,6 +36,7 @@ scoreboards, and music from a Navidrome library played in voice channels.
 | `/timezone` | Set your time zone so others can convert the times you write. | `zone` (autocompletes) |
 | Convert times (right-click a message → Apps) | Privately shows the times in a message ("on at 9pm") in your own time zone. | None |
 | `/coinflip`, `/slots` | Bet fake coins on heads or tails (double or nothing) or a slot machine. | `call`, `bet` |
+| `/roulette` | European roulette with an animated spinning wheel. Red/black, odd/even, low/high pay 1:1, dozens 2:1, a single number 35:1. | `on`, `bet`, `number` |
 | `/daily`, `/balance`, `/leaderboard` | Free coins every 20 hours, balances, and the richest members. Coins are per server; everyone starts with 1,000. | `who` |
 | `/music play` / `skip` / `queue` / `stop` | Play songs and albums from Navidrome in your voice channel. | `search` (autocompletes from the library) |
 
@@ -166,6 +167,7 @@ go test ./...
 |-- internal/deadlock          # Deadlock API client, summaries, and image cards
 |-- internal/discordutil       # Discord response helpers
 |-- internal/navidrome         # Navidrome (Subsonic) client and Opus stream reader
+|-- internal/roulette          # Roulette wheel drawing and spin animation
 |-- internal/serverstats       # Valve A2S querying and live scoreboard cards
 `-- internal/weather           # wttr.in integration
 ```
