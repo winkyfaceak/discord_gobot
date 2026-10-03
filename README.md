@@ -33,6 +33,7 @@ scoreboards, and music from a Navidrome library played in voice channels.
 | `/deadlock-statistics` | Browse a player's Deadlock performance and status. | `account`, `view`, `recent-count`, `rank-image`, `interactive`, `image`, `private` |
 | `/server-stats` | Open a live Source server scoreboard session. | `address` |
 | `/remind` | Ping someone (or yourself) in the channel later. Survives restarts. | `when` (`20m`, `1h30m`, `2 days`, `18:30`, `6pm`), `what`, `who` |
+| `/fixlink`, or Fix X link (right-click a message → Apps) | Privately replies with the fixupx.com version of X/Twitter post links, which embed properly (so GIFs can be starred). | `link` |
 | `/timezone` | Set your time zone so others can convert the times you write. | `zone` (autocompletes) |
 | Convert times (right-click a message → Apps) | Privately shows the times in a message ("on at 9pm") in your own time zone. | None |
 | `/coinflip` | Bet fake coins on heads or tails: double or nothing. | `call`, `bet` |

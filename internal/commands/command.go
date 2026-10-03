@@ -61,6 +61,7 @@ func All(cfg config.Config) []Command {
 	}
 	cmds = append(cmds, NewTimeZones(filepath.Join(cfg.StateDir, "timezones.json")).Commands()...)
 	cmds = append(cmds, NewCasino(filepath.Join(cfg.StateDir, "casino.json")).Commands()...)
+	cmds = append(cmds, FixLinkCommands()...)
 
 	if cfg.NavidromeUser != "" {
 		cmds = append(cmds, NewMusic(navidrome.New(cfg.NavidromeURL, cfg.NavidromeUser, cfg.NavidromePassword)))
