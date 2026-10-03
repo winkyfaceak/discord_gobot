@@ -280,6 +280,13 @@ type musicPlayer struct {
 	stream        *navidrome.OpusStream
 	idle          *time.Timer
 	stopped       bool
+	played        int // songs started, so card updates apply in order
+
+	// The "now playing" card, edited for each new song
+	cardMu      sync.Mutex
+	cardChannel snowflake.ID
+	cardMessage snowflake.ID
+	cardShown   int
 }
 
 // ProvideOpusFrame returns the next 20ms Opus packet, moving through the
@@ -319,7 +326,8 @@ func (p *musicPlayer) startNextLocked() bool {
 			continue
 		}
 		p.current, p.stream = &song, stream
-		go p.announce(song, p.textChannelID)
+		p.played++
+		go p.announce(song, p.textChannelID, p.played)
 		return true
 	}
 
@@ -411,8 +419,9 @@ func (p *musicPlayer) shutdown() {
 	p.conn.Close(ctx)
 }
 
-// announce posts a "now playing" card with the album cover.
-func (p *musicPlayer) announce(song navidrome.Song, channelID snowflake.ID) {
+// announce shows song (the number-th played) on the "now playing" card,
+// editing the card already in that channel rather than posting one per song.
+func (p *musicPlayer) announce(song navidrome.Song, channelID snowflake.ID, number int) {
 	if channelID == 0 {
 		return
 	}
@@ -423,23 +432,47 @@ func (p *musicPlayer) announce(song navidrome.Song, channelID snowflake.ID) {
 		Color:       0x5865f2,
 		Footer:      &discord.EmbedFooter{Text: formatSongLength(song.Duration)},
 	}
-	msg := discord.MessageCreate{}
+	var cover []byte
+	var coverName string
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if art, err := p.nav.CoverArt(ctx, song.CoverArt, 300); err == nil && len(art) > 0 {
-		name := "cover.jpg"
+		cover, coverName = art, "cover.jpg"
 		if http.DetectContentType(art) == "image/png" {
-			name = "cover.png"
+			coverName = "cover.png"
 		}
-		embed.Thumbnail = &discord.EmbedResource{URL: "attachment://" + name}
-		msg.Files = []*discord.File{discord.NewFile(name, "Album cover", bytes.NewReader(art))}
+		embed.Thumbnail = &discord.EmbedResource{URL: "attachment://" + coverName}
 	}
-	msg.Embeds = []discord.Embed{embed}
+	// Each send needs its own reader over the cover
+	files := func() []*discord.File {
+		if cover == nil {
+			return nil
+		}
+		return []*discord.File{discord.NewFile(coverName, "Album cover", bytes.NewReader(cover))}
+	}
 
-	if _, err := p.client.Rest.CreateMessage(channelID, msg); err != nil {
-		log.Printf("music: post now playing: %v", err)
+	p.cardMu.Lock()
+	defer p.cardMu.Unlock()
+	if number <= p.cardShown {
+		return // a later song already took the card (quick skips)
 	}
+	p.cardShown = number
+
+	if p.cardMessage != 0 && p.cardChannel == channelID {
+		update := discord.MessageUpdate{Embeds: &[]discord.Embed{embed}, Attachments: &[]discord.AttachmentUpdate{}, Files: files()}
+		_, err := p.client.Rest.UpdateMessage(channelID, p.cardMessage, update)
+		if err == nil {
+			return
+		}
+		log.Printf("music: update now playing card (posting a new one): %v", err)
+	}
+	msg, err := p.client.Rest.CreateMessage(channelID, discord.MessageCreate{Embeds: []discord.Embed{embed}, Files: files()})
+	if err != nil {
+		log.Printf("music: post now playing: %v", err)
+		return
+	}
+	p.cardChannel, p.cardMessage = channelID, msg.ID
 }
 
 func songLabel(song navidrome.Song) string {
