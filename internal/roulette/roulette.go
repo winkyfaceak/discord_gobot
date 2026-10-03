@@ -9,9 +9,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/draw"
 	"image/gif"
-	"image/png"
 	"math"
 	"slices"
 	"strings"
@@ -85,7 +83,7 @@ func RenderSpin(ctx context.Context, result int) (gifData []byte, still []byte, 
 		if i == frames-1 {
 			delay = 250 // linger on where it stopped
 		}
-		anim.Image = append(anim.Image, base.quantize(frame))
+		anim.Image = append(anim.Image, base.palette.Quantize(frame, frame.Bounds()))
 		anim.Delay = append(anim.Delay, delay)
 	}
 	var out bytes.Buffer
@@ -97,12 +95,10 @@ func RenderSpin(ctx context.Context, result int) (gifData []byte, still []byte, 
 	return out.Bytes(), still, err
 }
 
-// wheelImage is the wheel at rest, with a GIF palette and a lookup table from
-// 15-bit RGB to the nearest palette entry.
+// wheelImage is the wheel at rest and the GIF colours its frames use.
 type wheelImage struct {
 	image   *image.RGBA
-	palette color.Palette
-	nearest []uint8
+	palette *render.Palette
 }
 
 var (
@@ -117,51 +113,17 @@ func cachedWheel(ctx context.Context) (*wheelImage, error) {
 		return wheelCache, nil
 	}
 
-	pngData, err := render.PNG(ctx, wheelSVG(0, -1))
+	img, err := render.RGBA(ctx, wheelSVG(0, -1))
 	if err != nil {
 		return nil, err
 	}
-	decoded, err := png.Decode(bytes.NewReader(pngData))
+	// The wheel's colours, plus the ball's
+	palette, err := render.NewPalette(ctx, wheelSVG(0, -1), color.RGBA{0xf7, 0xf7, 0xf2, 0xff}, color.RGBA{0x9a, 0x9a, 0x90, 0xff}, color.RGBA{0xd0, 0xd0, 0xc8, 0xff})
 	if err != nil {
 		return nil, err
 	}
-	img := image.NewRGBA(decoded.Bounds())
-	draw.Draw(img, img.Bounds(), decoded, image.Point{}, draw.Src)
-
-	// Let ImageMagick pick the wheel's 248 best colours, then add the ball's
-	gifData, err := render.Magick(ctx, wheelSVG(0, -1), "svg:-", "-colors", "248", "gif:-")
-	if err != nil {
-		return nil, err
-	}
-	quantized, err := gif.Decode(bytes.NewReader(gifData))
-	if err != nil {
-		return nil, err
-	}
-	// GIF pads its colour table to 256 with repeats; keep each colour once
-	var palette color.Palette
-	for _, c := range quantized.(*image.Paletted).Palette {
-		if len(palette) < 253 && !slices.Contains(palette, c) {
-			palette = append(palette, c)
-		}
-	}
-	palette = append(palette, color.RGBA{0xf7, 0xf7, 0xf2, 0xff}, color.RGBA{0x9a, 0x9a, 0x90, 0xff}, color.RGBA{0xd0, 0xd0, 0xc8, 0xff})
-
-	nearest := make([]uint8, 1<<15)
-	for key := range nearest {
-		c := color.RGBA{uint8(key>>10) << 3, uint8(key>>5&31) << 3, uint8(key&31) << 3, 0xff}
-		nearest[key] = uint8(palette.Index(c))
-	}
-	wheelCache = &wheelImage{image: img, palette: palette, nearest: nearest}
+	wheelCache = &wheelImage{image: img, palette: palette}
 	return wheelCache, nil
-}
-
-func (w *wheelImage) quantize(img *image.RGBA) *image.Paletted {
-	out := image.NewPaletted(img.Bounds(), w.palette)
-	for i := 0; i < len(img.Pix); i += 4 {
-		r, g, b := img.Pix[i], img.Pix[i+1], img.Pix[i+2]
-		out.Pix[i/4] = w.nearest[int(r>>3)<<10|int(g>>3)<<5|int(b>>3)]
-	}
-	return out
 }
 
 // rotate turns img clockwise by degrees around its center, smoothing with

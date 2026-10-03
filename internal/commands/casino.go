@@ -70,15 +70,7 @@ func (c *Casino) Commands() []Command {
 			},
 			handle: c.coinflip,
 		},
-		funcCommand{
-			def: discord.SlashCommandCreate{
-				Name:        "slots",
-				Description: "Spin the slot machine",
-				Contexts:    guildOnly,
-				Options:     []discord.ApplicationCommandOption{bet},
-			},
-			handle: c.slots,
-		},
+		NewSlots(c),
 		c.rouletteCommand(),
 		NewBlackjack(c),
 		NewHorseRace(c),
@@ -129,46 +121,6 @@ func (c *Casino) coinflip(e *events.ApplicationCommandInteractionCreate) {
 	}
 	discordutil.Reply(e, fmt.Sprintf("🪙 %s called **%s**… it landed on **%s**! You %s. Balance: **%s**",
 		e.User().EffectiveName(), call, landed, result, formatInt(int(balance))), false)
-}
-
-func (c *Casino) slots(e *events.ApplicationCommandInteractionCreate) {
-	bet := int64(e.SlashCommandInteractionData().Int("bet"))
-	reels := [3]string{spinReel(), spinReel(), spinReel()}
-	multiplier := slotMultiplier(reels)
-
-	balance, problem := c.play(*e.GuildID(), e.User().ID, bet, func() int64 { return bet * multiplier })
-	if problem != "" {
-		discordutil.Reply(e, problem, true)
-		return
-	}
-
-	// Stop the reels one at a time; the result is already decided and paid
-	name := e.User().EffectiveName()
-	frame := func(stopped int) string {
-		shown := [3]string{"❔", "❔", "❔"}
-		copy(shown[:stopped], reels[:stopped])
-		return fmt.Sprintf("🎰 **%s** spins…\n> %s %s %s", name, shown[0], shown[1], shown[2])
-	}
-	discordutil.Reply(e, frame(0), false)
-	for stopped := 1; stopped <= 2; stopped++ {
-		time.Sleep(700 * time.Millisecond)
-		discordutil.EditText(e, frame(stopped))
-	}
-	time.Sleep(700 * time.Millisecond)
-
-	var result string
-	switch {
-	case multiplier == 0:
-		result = "No luck: lost **" + formatInt(int(bet)) + "** coins."
-	case multiplier == 1:
-		result = "A pair: you get your **" + formatInt(int(bet)) + "** coins back."
-	case multiplier >= 100:
-		result = fmt.Sprintf("💰 **JACKPOT!** ×%d: won **%s** coins!", multiplier, formatInt(int(bet*(multiplier-1))))
-	default:
-		result = fmt.Sprintf("**Win!** ×%d: won **%s** coins.", multiplier, formatInt(int(bet*(multiplier-1))))
-	}
-	discordutil.EditText(e, fmt.Sprintf("🎰 **%s**\n> %s %s %s\n%s Balance: **%s**",
-		name, reels[0], reels[1], reels[2], result, formatInt(int(balance))))
 }
 
 func (c *Casino) daily(e *events.ApplicationCommandInteractionCreate) {
@@ -286,57 +238,4 @@ func (c *Casino) saveLocked() {
 	if err := saveJSON(c.path, c.accounts); err != nil {
 		log.Printf("casino: save: %v", err)
 	}
-}
-
-// slotSymbols lists each reel's symbols with how often they come up and what
-// three of a kind pays per coin bet. TestSlotsKeepASmallHouseEdge checks the
-// table still pays back a little under 100% on average.
-var slotSymbols = []struct {
-	symbol string
-	weight int
-	three  int64
-}{
-	{"🍒", 8, 5}, {"🍋", 7, 8}, {"🍊", 6, 10}, {"🍇", 5, 15}, {"🔔", 3, 40}, {"💎", 2, 100}, {"7️⃣", 1, 500},
-}
-
-func spinReel() string {
-	total := 0
-	for _, s := range slotSymbols {
-		total += s.weight
-	}
-	n := rand.IntN(total)
-	for _, s := range slotSymbols {
-		if n < s.weight {
-			return s.symbol
-		}
-		n -= s.weight
-	}
-	return slotSymbols[0].symbol
-}
-
-// slotMultiplier is what a spin pays per coin bet: three of a kind pays its
-// symbol's multiplier, two cherries pay 2×, any other pair returns the bet,
-// and anything else loses it.
-func slotMultiplier(reels [3]string) int64 {
-	a, b, c := reels[0], reels[1], reels[2]
-	switch {
-	case a == b && b == c:
-		for _, s := range slotSymbols {
-			if s.symbol == a {
-				return s.three
-			}
-		}
-	case a == b || a == c:
-		return pairMultiplier(a)
-	case b == c:
-		return pairMultiplier(b)
-	}
-	return 0
-}
-
-func pairMultiplier(symbol string) int64 {
-	if symbol == "🍒" {
-		return 2
-	}
-	return 1
 }

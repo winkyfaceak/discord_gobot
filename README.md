@@ -35,9 +35,10 @@ scoreboards, and music from a Navidrome library played in voice channels.
 | `/remind` | Ping someone (or yourself) in the channel later. Survives restarts. | `when` (`20m`, `1h30m`, `2 days`, `18:30`, `6pm`), `what`, `who` |
 | `/timezone` | Set your time zone so others can convert the times you write. | `zone` (autocompletes) |
 | Convert times (right-click a message → Apps) | Privately shows the times in a message ("on at 9pm") in your own time zone. | None |
-| `/coinflip`, `/slots` | Bet fake coins on heads or tails (double or nothing) or a slot machine. | `call`, `bet` |
+| `/coinflip` | Bet fake coins on heads or tails: double or nothing. | `call`, `bet` |
+| `/slots` | An animated slot machine; the result has a Spin again button with the same bet. | `bet` |
 | `/roulette` | European roulette with an animated spinning wheel. Red/black, odd/even, low/high pay 1:1, dozens 2:1, a single number 35:1. | `on`, `bet`, `number` |
-| `/blackjack` | A hand against the dealer with Hit / Stand / Double buttons. Six decks, dealer stands on 17, blackjack pays 3:2. | `bet` |
+| `/blackjack` | A hand against the dealer with Hit / Stand / Double buttons, then Deal again. Six decks, dealer stands on 17, blackjack pays 3:2. | `bet` |
 | `/horserace` | Opens a race for 60 seconds: everyone picks a horse for the same stake, then it runs live and the winner's backers split the pot. Needs 2+ riders. | `stake` |
 | `/daily`, `/balance`, `/leaderboard` | Free coins every 20 hours, balances, and the richest members. Coins are per server; everyone starts with 1,000. | `who` |
 | `/music play` / `skip` / `queue` / `stop` | Play songs and albums from Navidrome in your voice channel. | `search` (autocompletes from the library) |
@@ -170,9 +171,10 @@ go test ./...
 |-- internal/deadlock          # Deadlock API client, summaries, and image cards
 |-- internal/discordutil       # Discord response helpers
 |-- internal/navidrome         # Navidrome (Subsonic) client and Opus stream reader
-|-- internal/render            # SVG to PNG through ImageMagick
+|-- internal/render            # SVG to PNG through ImageMagick, GIF frame helpers
 |-- internal/roulette          # Roulette wheel drawing and spin animation
 |-- internal/serverstats       # Valve A2S querying and live scoreboard cards
+|-- internal/slots             # Slot machine reels, payouts and drawing
 `-- internal/weather           # wttr.in integration
 ```
 

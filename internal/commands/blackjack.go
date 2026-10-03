@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -33,6 +34,7 @@ type blackjackTable struct {
 	id      string
 	guildID snowflake.ID
 	player  discord.User
+	stake   int64 // the opening bet, for Deal again (the game's bet doubles)
 
 	mu   sync.Mutex // serialises button presses on this hand
 	game *blackjack.Game
@@ -69,10 +71,23 @@ func (b *Blackjack) Definition() discord.ApplicationCommandCreate {
 
 func (b *Blackjack) Handle(e *events.ApplicationCommandInteractionCreate) {
 	bet := int64(e.SlashCommandInteractionData().Int("bet"))
+	b.deal(e, e.User(), *e.GuildID(), bet, func() error { return e.DeferCreateMessage(false) })
+}
+
+// dealer is the interaction a new hand is dealt from: a /blackjack command or
+// a Deal again button.
+type dealer interface {
+	discordutil.Interaction
+	discordutil.Replier
+}
+
+// deal takes the bet and starts a hand in the interaction's message.
+func (b *Blackjack) deal(e dealer, player discord.User, guildID snowflake.ID, bet int64, deferResponse func() error) {
 	t := &blackjackTable{
 		id:      randomID(),
-		guildID: *e.GuildID(),
-		player:  e.User(),
+		guildID: guildID,
+		player:  player,
+		stake:   bet,
 		client:  e.Client(),
 		appID:   e.ApplicationID(),
 		token:   e.Token(),
@@ -87,7 +102,7 @@ func (b *Blackjack) Handle(e *events.ApplicationCommandInteractionCreate) {
 		discordutil.Reply(e, problem, true)
 		return
 	}
-	if err := e.DeferCreateMessage(false); err != nil {
+	if err := deferResponse(); err != nil {
 		log.Printf("blackjack: defer: %v", err)
 		b.release(t)
 		b.casino.give(t.guildID, t.player.ID, bet)
@@ -103,6 +118,10 @@ func (b *Blackjack) Handle(e *events.ApplicationCommandInteractionCreate) {
 func (b *Blackjack) HandleComponent(e *events.ComponentInteractionCreate) {
 	_, rest, _ := strings.Cut(e.Data.CustomID(), ":")
 	id, action, _ := strings.Cut(rest, ":")
+	if id == "again" {
+		b.dealAgain(e, action)
+		return
+	}
 
 	b.mu.Lock()
 	t := b.tables[id]
@@ -148,6 +167,21 @@ func (b *Blackjack) HandleComponent(e *events.ComponentInteractionCreate) {
 	b.show(t, "")
 }
 
+// dealAgain handles Deal again ("blackjack:again:<player>:<bet>"): a new
+// hand for the same player and bet, in the same message.
+func (b *Blackjack) dealAgain(e *events.ComponentInteractionCreate, args string) {
+	owner, betText, _ := strings.Cut(args, ":")
+	bet, err := strconv.ParseInt(betText, 10, 64)
+	if err != nil {
+		return
+	}
+	if owner != e.User().ID.String() {
+		discordutil.Reply(e, "This was someone else's hand. Start your own with `/blackjack`.", true)
+		return
+	}
+	b.deal(e, e.User(), *e.GuildID(), bet, func() error { return e.DeferUpdateMessage() })
+}
+
 // Shutdown refunds hands still in play, since they can't be finished.
 func (b *Blackjack) Shutdown() {
 	b.mu.Lock()
@@ -186,6 +220,9 @@ func (b *Blackjack) show(t *blackjackTable, note string) {
 			result = "Your bet is returned."
 		}
 		text = fmt.Sprintf("🃏 **%s** bet **%s**: %s %s Balance: **%s**%s", name, formatInt(int(game.Bet)), game.Summary(), result, formatInt(int(balance)), note)
+		components = []discord.LayoutComponent{discord.NewActionRow(
+			discord.NewPrimaryButton(fmt.Sprintf("Deal again (%s)", formatInt(int(t.stake))), fmt.Sprintf("blackjack:again:%s:%d", t.player.ID, t.stake)),
+		)}
 	} else {
 		text = fmt.Sprintf("🃏 **%s** bets **%s**. You have **%s**; the dealer shows **%s**.", name, formatInt(int(game.Bet)), game.Player.Label(), game.Dealer[0])
 		canDouble := game.CanDouble() && b.casino.coins(t.guildID, t.player.ID) >= game.Bet

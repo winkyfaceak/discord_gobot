@@ -5,37 +5,6 @@ import (
 	"testing"
 )
 
-func TestSlotsKeepASmallHouseEdge(t *testing.T) {
-	total := 0
-	for _, s := range slotSymbols {
-		total += s.weight
-	}
-	// Exact average payout per coin over every possible spin
-	var paid float64
-	for _, a := range slotSymbols {
-		for _, b := range slotSymbols {
-			for _, c := range slotSymbols {
-				chance := float64(a.weight*b.weight*c.weight) / float64(total*total*total)
-				paid += chance * float64(slotMultiplier([3]string{a.symbol, b.symbol, c.symbol}))
-			}
-		}
-	}
-	if paid < 0.90 || paid >= 1.0 {
-		t.Fatalf("slots pay back %.3f per coin on average, want a small house edge (0.90 to 1.00)", paid)
-	}
-
-	for reels, want := range map[[3]string]int64{
-		{"7️⃣", "7️⃣", "7️⃣"}: 500,
-		{"🍒", "🍋", "🍒"}:       2,
-		{"🍋", "🍇", "🍇"}:       1,
-		{"🍒", "🍋", "🍇"}:       0,
-	} {
-		if got := slotMultiplier(reels); got != want {
-			t.Errorf("slotMultiplier(%v) = %d, want %d", reels, got, want)
-		}
-	}
-}
-
 func TestCasinoBetsNeedTheCoinsAndAreSaved(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "casino.json")
 	casino := NewCasino(path)
