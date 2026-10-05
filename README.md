@@ -41,7 +41,7 @@ scoreboards, and music from a Navidrome library played in voice channels.
 | `/roulette` | European roulette with an animated spinning wheel. Red/black, odd/even, low/high pay 1:1, dozens 2:1, a single number 35:1. | `on`, `bet`, `number` |
 | `/blackjack` | A hand against the dealer with Hit / Stand / Double buttons, then Deal again. Six decks, dealer stands on 17, blackjack pays 3:2. | `bet` |
 | `/horserace` | Opens a race for 60 seconds: everyone picks a horse for the same stake, then it runs live and the winner's backers split the pot. Needs 2+ riders. | `stake` |
-| `/duel` | Challenge someone to rock-paper-scissors. Both stake the bet and pick in secret with buttons; the winner takes both, a draw goes again. Unaccepted or unfinished duels are refunded after a minute. | `opponent`, `bet` |
+| `/duel` | Challenge someone to rock-paper-scissors or Connect 4. Both stake the bet and the winner takes both. Rock-paper-scissors picks are secret buttons and a draw goes again; Connect 4 is played on a drawn board with column buttons, two minutes a move or you lose, and a full board is refunded. Unaccepted duels are refunded after a minute. | `opponent`, `bet`, `game` |
 | `/daily`, `/balance`, `/leaderboard` | Free coins every 20 hours, balances, and the richest members. Coins are per server; everyone starts with 1,000. | `who` |
 | `/music play` / `skip` / `queue` / `stop` | Play songs and albums from Navidrome in your voice channel. | `search` (autocompletes from the library) |
 
