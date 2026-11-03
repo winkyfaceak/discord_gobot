@@ -239,10 +239,14 @@ func (r *Remind) fire(id string) {
 		text += fmt.Sprintf("\n-# This was due <t:%d:R>, while I was offline.", rem.Due.Unix())
 	}
 
-	// Ping only the person being reminded, never roles or @everyone in the text
+	// Ping the person being reminded and whoever set it, never roles or @everyone in the text
+	ping := []snowflake.ID{rem.TargetID}
+	if rem.CreatorID != rem.TargetID {
+		ping = append(ping, rem.CreatorID)
+	}
 	_, err := client.Rest.CreateMessage(rem.ChannelID, discord.MessageCreate{
 		Content:         text,
-		AllowedMentions: &discord.AllowedMentions{Parse: []discord.AllowedMentionType{}, Users: []snowflake.ID{rem.TargetID}},
+		AllowedMentions: &discord.AllowedMentions{Parse: []discord.AllowedMentionType{}, Users: ping},
 	})
 	if err != nil {
 		log.Printf("remind: send %s: %v", id, err)
